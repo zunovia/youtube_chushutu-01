@@ -1,29 +1,29 @@
 @echo off
 chcp 65001 >nul 2>&1
 REM ============================================================
-REM YouTube Chushutu - インストーラー (Windows)
-REM ダブルクリックで実行OK。仮想環境を自動作成します。
+REM YouTube Chushutu Installer for Windows
 REM ============================================================
 
+REM --- Resolve project directory properly ---
 set "SCRIPT_DIR=%~dp0"
-set "PROJECT_DIR=%SCRIPT_DIR%.."
+pushd "%SCRIPT_DIR%.."
+set "PROJECT_DIR=%CD%"
+popd
 set "BACKEND_DIR=%PROJECT_DIR%\backend"
 set "VENV_DIR=%BACKEND_DIR%\.venv"
 
 echo.
 echo =========================================
-echo   YouTube Chushutu インストーラー
+echo   YouTube Chushutu Installer
 echo =========================================
 echo.
 
-REM --- Python チェック ---
+REM --- Python check ---
 where python >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Pythonが見つかりません。
-    echo.
-    echo   https://www.python.org/downloads/ からインストールしてください。
-    echo   インストール時に「Add Python to PATH」にチェックを入れてください。
-    echo.
+    echo [ERROR] Python ga mitsukarimsen.
+    echo   https://www.python.org/downloads/
+    echo   Install ji ni "Add Python to PATH" ni check wo irete kudasai.
     pause
     exit /b 1
 )
@@ -31,58 +31,56 @@ if %ERRORLEVEL% neq 0 (
 for /f "tokens=*" %%i in ('python --version 2^>^&1') do set PYTHON_VER=%%i
 echo [OK] %PYTHON_VER%
 
-REM --- ffmpeg チェック ---
+REM --- ffmpeg check ---
 where ffmpeg >nul 2>&1
 if %ERRORLEVEL% equ 0 (
-    echo [OK] ffmpeg が見つかりました
+    echo [OK] ffmpeg found
 ) else (
-    echo [WARN] ffmpegが見つかりません。音声変換 MP3等 にはffmpegが必要です。
+    echo [WARN] ffmpeg not found. Required for audio conversion.
     echo.
-    echo   インストール方法:
-    echo     1. https://www.gyan.dev/ffmpeg/builds/ から ffmpeg-release-essentials.zip をダウンロード
-    echo     2. 解凍して bin フォルダ内の ffmpeg.exe のパスを環境変数PATHに追加
-    echo.
-    echo   ffmpegなしでも動画ダウンロードは可能です。後からインストールできます。
+    echo   Download from: https://www.gyan.dev/ffmpeg/builds/
+    echo   Add ffmpeg.exe to PATH.
+    echo   Video download works without ffmpeg.
     echo.
 )
 
-REM --- 仮想環境の作成 ---
+REM --- Create virtual environment ---
 echo.
 if exist "%VENV_DIR%\Scripts\python.exe" (
-    echo [OK] 仮想環境は既に存在します
+    echo [OK] Virtual environment already exists
 ) else (
-    echo 仮想環境を作成中...
+    echo Creating virtual environment...
     python -m venv "%VENV_DIR%"
-    echo [OK] 仮想環境を作成しました
+    echo [OK] Virtual environment created
 )
 
-REM --- パッケージインストール ---
-echo パッケージをインストール中...
+REM --- Install packages ---
+echo Installing packages...
 "%VENV_DIR%\Scripts\pip.exe" install --upgrade pip -q
 "%VENV_DIR%\Scripts\pip.exe" install -e "%BACKEND_DIR%" -q
-echo [OK] パッケージのインストール完了
+echo [OK] Package installation complete
 
-REM --- バージョン確認 ---
+REM --- Version check ---
 echo.
-echo --- インストール済みバージョン ---
+echo --- Installed versions ---
 "%VENV_DIR%\Scripts\python.exe" -c "import yt_dlp, fastapi, pydantic; print(f'  yt-dlp:   {yt_dlp.version.__version__}'); print(f'  FastAPI:  {fastapi.__version__}'); print(f'  Pydantic: {pydantic.__version__}')"
 
-REM --- 完了メッセージ ---
+REM --- Done ---
 echo.
 echo =========================================
-echo   インストール完了!
+echo   Install complete!
 echo =========================================
 echo.
-echo 【バックエンド起動方法】
-echo   %PROJECT_DIR%\start.bat をダブルクリック
+echo --- How to start backend ---
+echo   Double-click: %PROJECT_DIR%\start.bat
 echo.
-echo 【Chrome拡張の読み込み方法】
-echo   1. Chromeで chrome://extensions を開く
-echo   2. 「デベロッパーモード」をONにする
-echo   3. 「パッケージ化されていない拡張機能を読み込む」をクリック
-echo   4. 次のフォルダを選択: %PROJECT_DIR%\extension
+echo --- How to load Chrome extension ---
+echo   1. Open chrome://extensions in Chrome
+echo   2. Enable Developer Mode
+echo   3. Click "Load unpacked"
+echo   4. Select folder: %PROJECT_DIR%\extension
 echo.
-echo 【yt-dlp更新方法】YouTubeの仕様変更時
-echo   %PROJECT_DIR%\scripts\update-ytdlp.bat をダブルクリック
+echo --- How to update yt-dlp ---
+echo   Double-click: %PROJECT_DIR%\scripts\update-ytdlp.bat
 echo.
 pause
