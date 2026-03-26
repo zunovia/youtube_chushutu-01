@@ -36,10 +36,10 @@ where ffmpeg >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     echo [OK] ffmpeg が見つかりました
 ) else (
-    echo [WARN] ffmpegが見つかりません。音声変換(MP3等)にはffmpegが必要です。
+    echo [WARN] ffmpegが見つかりません。音声変換 MP3等 にはffmpegが必要です。
     echo.
     echo   インストール方法:
-    echo     1. https://www.gyan.dev/ffmpeg/builds/ から「ffmpeg-release-essentials.zip」をダウンロード
+    echo     1. https://www.gyan.dev/ffmpeg/builds/ から ffmpeg-release-essentials.zip をダウンロード
     echo     2. 解凍して bin フォルダ内の ffmpeg.exe のパスを環境変数PATHに追加
     echo.
     echo   ffmpegなしでも動画ダウンロードは可能です。後からインストールできます。
@@ -82,7 +82,7 @@ echo   2. 「デベロッパーモード」をONにする
 echo   3. 「パッケージ化されていない拡張機能を読み込む」をクリック
 echo   4. 次のフォルダを選択: %PROJECT_DIR%\extension
 echo.
-echo 【yt-dlp更新方法】(YouTubeの仕様変更時)
+echo 【yt-dlp更新方法】YouTubeの仕様変更時
 echo   %PROJECT_DIR%\scripts\update-ytdlp.bat をダブルクリック
 echo.
 pause
