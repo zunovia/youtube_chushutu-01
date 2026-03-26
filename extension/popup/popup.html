@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Chushutu</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <h1>YouTube Chushutu</h1>
+      <span id="status-dot" class="status-dot offline" title="Backend offline"></span>
+    </header>
+
+    <!-- Error state -->
+    <div id="error-section" class="section hidden">
+      <p id="error-message" class="error-text"></p>
+    </div>
+
+    <!-- Not on YouTube -->
+    <div id="not-youtube" class="section hidden">
+      <p class="muted">YouTubeの動画ページを開いてください</p>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading" class="section hidden">
+      <div class="spinner"></div>
+      <p class="muted">動画情報を取得中...</p>
+    </div>
+
+    <!-- Video info -->
+    <div id="video-info" class="section hidden">
+      <img id="thumbnail" class="thumbnail" alt="thumbnail">
+      <h2 id="video-title" class="video-title"></h2>
+      <div class="video-meta">
+        <span id="duration"></span>
+        <span class="separator">|</span>
+        <span id="channel"></span>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Mode selection -->
+      <div class="mode-tabs">
+        <button id="tab-video" class="tab active" data-mode="video">動画+音声</button>
+        <button id="tab-audio" class="tab" data-mode="audio">音声のみ</button>
+      </div>
+
+      <!-- Video format selection -->
+      <div id="video-options" class="options">
+        <label class="label">画質:</label>
+        <select id="format-select" class="select"></select>
+      </div>
+
+      <!-- Audio format selection -->
+      <div id="audio-options" class="options hidden">
+        <label class="label">形式:</label>
+        <select id="audio-format-select" class="select">
+          <option value="mp3">MP3</option>
+          <option value="m4a">M4A (AAC)</option>
+        </select>
+      </div>
+
+      <button id="download-btn" class="btn-download">ダウンロード</button>
+    </div>
+
+    <!-- Progress -->
+    <div id="progress-section" class="section hidden">
+      <div class="progress-info">
+        <span id="progress-status">ダウンロード中...</span>
+        <span id="progress-percent">0%</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+      </div>
+      <div class="progress-details">
+        <span id="progress-speed"></span>
+        <span id="progress-eta"></span>
+      </div>
+    </div>
+
+    <!-- Done -->
+    <div id="done-section" class="section hidden">
+      <p class="done-text">ダウンロード完了!</p>
+      <button id="open-file-btn" class="btn-secondary">ファイルを開く</button>
+      <button id="new-download-btn" class="btn-secondary">新しいダウンロード</button>
+    </div>
+  </div>
+
+  <script src="../lib/api-client.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

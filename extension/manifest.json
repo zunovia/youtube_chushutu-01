@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Chushutu",
+  "version": "1.0.0",
+  "description": "YouTube動画ダウンロード・音声抽出ツール",
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "http://localhost:9160/*"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/watch*"],
+      "js": ["content/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

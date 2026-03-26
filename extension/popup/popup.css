@@ -1,0 +1,265 @@
+/* === Base === */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 380px;
+  min-height: 200px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  color: #1a1a2e;
+  background: #ffffff;
+}
+
+#app {
+  padding: 12px 16px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* === Header === */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.header h1 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #e53e3e;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.online {
+  background: #38a169;
+}
+
+.status-dot.offline {
+  background: #a0aec0;
+}
+
+/* === Sections === */
+.section {
+  margin-bottom: 8px;
+}
+
+.muted {
+  color: #718096;
+  text-align: center;
+  padding: 20px 0;
+}
+
+.error-text {
+  color: #e53e3e;
+  background: #fff5f5;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+/* === Spinner === */
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #e53e3e;
+  border-radius: 50%;
+  margin: 16px auto 8px;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* === Video Info === */
+.thumbnail {
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.video-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.video-meta {
+  font-size: 12px;
+  color: #718096;
+  margin-bottom: 4px;
+}
+
+.separator {
+  margin: 0 6px;
+}
+
+.divider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 10px 0;
+}
+
+/* === Mode Tabs === */
+.mode-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.tab {
+  flex: 1;
+  padding: 6px 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f7fafc;
+  font-size: 12px;
+  font-weight: 500;
+  color: #4a5568;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.tab:hover {
+  background: #edf2f7;
+}
+
+.tab.active {
+  background: #e53e3e;
+  color: #fff;
+  border-color: #e53e3e;
+}
+
+/* === Options === */
+.options {
+  margin-bottom: 10px;
+}
+
+.label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #4a5568;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #1a1a2e;
+  background: #fff;
+  cursor: pointer;
+  appearance: auto;
+}
+
+.select:focus {
+  outline: none;
+  border-color: #e53e3e;
+  box-shadow: 0 0 0 2px rgba(229, 62, 62, 0.15);
+}
+
+/* === Buttons === */
+.btn-download {
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  background: #e53e3e;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-download:hover {
+  background: #c53030;
+}
+
+.btn-download:disabled {
+  background: #a0aec0;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f7fafc;
+  color: #4a5568;
+  font-size: 13px;
+  cursor: pointer;
+  margin-top: 6px;
+  transition: background 0.15s;
+}
+
+.btn-secondary:hover {
+  background: #edf2f7;
+}
+
+/* === Progress === */
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.progress-bar-bg {
+  width: 100%;
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #e53e3e, #f56565);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-details {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #718096;
+  margin-top: 4px;
+}
+
+/* === Done === */
+.done-text {
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: #38a169;
+  padding: 8px 0;
+}
