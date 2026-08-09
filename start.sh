@@ -24,13 +24,16 @@ echo "========================================="
 echo ""
 
 # ヘルス情報表示
+cd "$BACKEND_DIR"
 "$VENV_PYTHON" -c "
-import yt_dlp, shutil
-ffmpeg = 'OK' if shutil.which('ffmpeg') else 'NOT FOUND'
+import shutil, sys
+sys.path.insert(0, '.')
+import yt_dlp
+from app.config import settings
 print(f'  yt-dlp:  {yt_dlp.version.__version__}')
-print(f'  ffmpeg:  {ffmpeg}')
-print(f'  URL:     http://localhost:9160')
-print(f'  API Doc: http://localhost:9160/docs')
+print(f\"  ffmpeg:  {shutil.which('ffmpeg') or 'NOT FOUND — MP3変換と1080p以上は不可'}\")
+print(f'  URL:     http://localhost:{settings.port}')
+print(f'  API Doc: http://localhost:{settings.port}/docs')
 "
 echo ""
 echo "停止するには Ctrl+C を押してください"

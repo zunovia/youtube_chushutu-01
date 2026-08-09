@@ -72,6 +72,12 @@ RETRYABLE: frozenset[ErrorCode] = frozenset(
     }
 )
 
+# Retried across player clients, but never escalated to reading the browser
+# cookie store. Cookies are for cases where YouTube has actually challenged us;
+# spending that on a malformed URL or a transient socket error just makes a
+# permanent failure take several extra seconds to report.
+PLAIN_RETRY_ONLY: frozenset[ErrorCode] = frozenset({ErrorCode.UNKNOWN, ErrorCode.NETWORK})
+
 
 # Order matters: the first match wins, so narrower patterns come first.
 # "Sign in to confirm your age" must be read as AGE_RESTRICTED before the

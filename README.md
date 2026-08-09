@@ -43,15 +43,32 @@ yt-dlpに触れるのは `backend/app/services/extractor.py` 1ファイルだけ
 
 ## インストール
 
+### 方法A: ZIPをダウンロード（gitが不要・おすすめ）
+
+1. **[youtube_chushutu-01-v2.0.0.zip をダウンロード](https://github.com/zunovia/youtube_chushutu-01/archive/refs/tags/v2.0.0.zip)**
+2. 展開する（`C:\YouTubeChushutu` など、日本語やスペースを含まない場所を推奨）
+3. **Windows**: `scripts\install.bat` をダブルクリック
+   **macOS / Linux**: `./scripts/install.sh`
+
+常に最新版が欲しい場合はこちら:
+<https://github.com/zunovia/youtube_chushutu-01/archive/refs/heads/main.zip>
+
+### 方法B: git clone（更新が `git pull` だけで済む）
+
 ```bash
 git clone https://github.com/zunovia/youtube_chushutu-01.git
 cd youtube_chushutu-01
+./scripts/install.sh          # Windows は scripts\install.bat
 ```
 
-**Windows**: `scripts\install.bat` をダブルクリック（ffmpegの自動インストールも案内されます）
-**macOS / Linux**: `./scripts/install.sh`
+---
 
-インストーラーが仮想環境の作成と依存パッケージの導入をまとめて行います。
+インストーラーは仮想環境の作成と依存パッケージの導入をまとめて行い、
+**ffmpegが無ければ `winget` での自動インストールも提案します。**
+
+> ZIPで導入した場合は `.git` が無いため、**本体の更新は再ダウンロード**になります。
+> ただしYouTubeの仕様変更に対応するyt-dlpの更新はアプリ内のボタンで完結するので、
+> 通常の運用で困ることはありません。
 
 ### Chrome拡張の読み込み
 
@@ -95,13 +112,13 @@ yt-dlpのバージョン、ffmpegの有無、保存先、直近のエラーが�
 
 | 表示されるエラー | 原因と対処 |
 |---|---|
-| **ffmpegがインストールされていません** | 最も多い原因です。`winget install ffmpeg` を実行し、PowerShellを開き直してからサーバーを再起動してください。急ぐ場合は音声形式をM4Aにすると変換なしで保存できます。 |
+| **ffmpegがインストールされていません** | 最も多い原因です。PowerShellで `winget install --id Gyan.FFmpeg -e` を実行し、PowerShellを開き直してからサーバーを再起動してください。急ぐ場合は音声形式をM4Aにすると変換なしで保存できます。 |
 | **YouTubeにアクセスを拒否されました（403）** | yt-dlpが古いときに起きます。「yt-dlpを更新」→ サーバー再起動。 |
 | **YouTubeの仕様変更に追随できていません** | 同上。yt-dlpを更新してください。 |
 | **botと判定されました** | ChromeのCookieで自動的に再試行しますが、それでも駄目な場合はChromeでYouTubeにログインしてください。 |
 | **年齢制限つきの動画です** | ChromeでYouTubeにログインした状態にしてください。 |
 | **ブラウザのCookieを読み取れませんでした** | Chromeを完全に終了してから再試行してください。Chrome以外を使っている場合は `YTC_COOKIE_BROWSER=firefox` のように指定します。 |
-| **バックエンドに接続できません** | `start.bat` を実行してサーバーを起動してください。ポート9160が他のソフトと衝突している場合は `YTC_PORT` で変更できます。 |
+| **バックエンドに接続できません** | `start.bat` を実行してサーバーを起動してください。ポート9160が他のソフトと衝突している場合は、`YTC_PORT` でサーバー側を変更し、**同じ番号を拡張機能の「診断」画面のポート欄にも入力**してください（両方を合わせる必要があります）。 |
 | **選択した画質が取得できませんでした** | 画質を「自動（最高画質）」にしてやり直してください。 |
 | 動画下にボタンが出ない | YouTube側のレイアウト変更の可能性があります。ツールバーの拡張アイコンからは引き続き使えます。 |
 
@@ -113,7 +130,7 @@ yt-dlpのバージョン、ffmpegの有無、保存先、直近のエラーが�
 
 | 変数 | 既定値 | 説明 |
 |---|---|---|
-| `YTC_PORT` | `9160` | バックエンドのポート |
+| `YTC_PORT` | `9160` | バックエンドのポート（拡張機能の「診断」画面でも同じ値に設定すること） |
 | `YTC_DOWNLOAD_DIR` | `~/Downloads/YouTubeChushutu` | 保存先 |
 | `YTC_COOKIE_BROWSER` | `chrome` | Cookieの取得元ブラウザ |
 | `YTC_COOKIES_FILE` | （空） | cookies.txt を使う場合のパス |
@@ -151,6 +168,13 @@ extension/
   popup/                 ツールバーのUI
   content/               YouTubeページ内のボタン
   lib/api-client.js      ポップアップとページ内ボタンで共有
+```
+
+**テストの実行**
+
+```bash
+backend/.venv/bin/python -m pip install -e backend[dev]   # pytest を追加
+backend/.venv/bin/python -m pytest backend/tests -q
 ```
 
 **設計上の約束ごと**

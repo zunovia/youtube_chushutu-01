@@ -52,7 +52,10 @@ class DownloadManager:
 
     def get_progress(self, task_id: str) -> DownloadTask | None:
         with self._lock:
-            return self._tasks.get(task_id)
+            task = self._tasks.get(task_id)
+            # Copy under the lock: the caller serializes this outside it, while
+            # a worker thread may still be writing to the live object.
+            return task.model_copy() if task else None
 
     def _evict(self) -> None:
         """Drop old finished tasks. Running tasks are never evicted."""
@@ -120,7 +123,7 @@ class DownloadManager:
                 attempt=index,
                 max_attempts=total,
                 attempt_note=note,
-                percent=0.0 if index > 1 else 0.0,
+                percent=0.0,
                 speed="",
                 eta="",
             )

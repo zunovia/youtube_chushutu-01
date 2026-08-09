@@ -113,6 +113,11 @@
   <div id="diagnostics-section" class="section hidden">
     <h2 class="section-title">診断情報</h2>
     <pre id="diagnostics-text" class="diagnostics"></pre>
+    <label class="label" for="port-input">バックエンドのポート</label>
+    <div class="port-row">
+      <input id="port-input" class="select" type="number" min="1" max="65535" placeholder="9160">
+      <button id="port-save" class="btn-mini">保存</button>
+    </div>
     <button id="diagnostics-copy" class="btn-secondary">コピー</button>
     <button id="diagnostics-close" class="btn-secondary">戻る</button>
   </div>

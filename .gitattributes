@@ -1,0 +1,17 @@
+# Windows batch files must have CRLF line endings.
+#
+# CMD's multi-line `if (...) else (...)` blocks and `goto :label` jumps are a
+# known parsing hazard with LF-only files, and this project has already shipped
+# two Windows batch regressions. `core.autocrlf` would cover a git clone but not
+# a ZIP download from GitHub — which is the documented install path — so pin it
+# here, where it applies to both.
+*.bat text eol=crlf
+
+# Everything else stays LF so the shell scripts work on macOS and Linux.
+*.sh text eol=lf
+*.py text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
+*.png binary

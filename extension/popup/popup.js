@@ -5,6 +5,10 @@
  * touched by section switching. In v1 `showSection()` began by hiding the
  * error box, so every failure message was erased microseconds after being
  * shown and downloads appeared to fail silently.
+ *
+ * The second rule, learned from the same incident: a message the user can see
+ * must come with something they can *do*. Every error carries a remedy, and if
+ * it offers a button that button must actually work in the state it appears in.
  */
 
 const $ = (id) => document.getElementById(id);
@@ -56,9 +60,18 @@ const els = {
   diagnosticsText: $("diagnostics-text"),
   diagnosticsCopy: $("diagnostics-copy"),
   diagnosticsClose: $("diagnostics-close"),
+  portInput: $("port-input"),
+  portSave: $("port-save"),
 };
 
-const SECTIONS = ["not-youtube", "loading", "video-info", "progress-section", "done-section", "diagnostics-section"];
+const SECTIONS = [
+  "not-youtube",
+  "loading",
+  "video-info",
+  "progress-section",
+  "done-section",
+  "diagnostics-section",
+];
 
 const STATUS_LABEL = {
   pending: "準備中...",
@@ -68,6 +81,22 @@ const STATUS_LABEL = {
   error: "エラー",
 };
 
+// Buttons a remedy can offer. Declared before showError() uses it, so no code
+// path can hit the temporal dead zone inside the very function whose job is
+// to report errors.
+const ACTION_LABELS = {
+  update_ytdlp: "yt-dlpを更新",
+  install_ffmpeg: "インストール手順を見る",
+  login_youtube: "YouTubeを開く",
+  choose_auto_format: "自動画質でやり直す",
+  retry: "もう一度試す",
+  open_diagnostics: "診断情報を見る",
+};
+
+const FFMPEG_WARNING =
+  "ffmpegが見つかりません。MP3変換と高画質（1080p以上）の保存にはffmpegが必要です。" +
+  "この状態でも720p程度までは保存できます。";
+
 const state = {
   url: null,
   mode: "video",
@@ -76,7 +105,9 @@ const state = {
   health: null,
   pollTimer: null,
   pollFailures: 0,
-  lastRequest: null,
+  warnings: [],
+  // Which stage failed, so "もう一度試す" retries the right thing.
+  failedStage: null, // "info" | "download" | null
 };
 
 // === Section / banner plumbing ==============================================
@@ -91,6 +122,7 @@ function showSection(id) {
 function clearBanners() {
   els.errorBanner.classList.add("hidden");
   els.warningBanner.classList.add("hidden");
+  state.warnings = [];
 }
 
 function showError(message, { remedy = "", action = "", detail = "", attempts = [] } = {}) {
@@ -112,21 +144,19 @@ function showError(message, { remedy = "", action = "", detail = "", attempts = 
   els.errorBanner.classList.remove("hidden");
 }
 
+/** Warnings accumulate — a second one must not erase the first. */
 function showWarning(message) {
-  els.warningText.textContent = message;
+  if (!message || state.warnings.includes(message)) return;
+  state.warnings.push(message);
+  els.warningText.textContent = state.warnings.join("\n\n");
   els.warningBanner.classList.remove("hidden");
 }
 
-// === Remedy buttons =========================================================
+function warnIfNoFfmpeg() {
+  if (state.health && !state.health.ffmpeg_available) showWarning(FFMPEG_WARNING);
+}
 
-const ACTION_LABELS = {
-  update_ytdlp: "yt-dlpを更新",
-  install_ffmpeg: "インストール手順を見る",
-  login_youtube: "YouTubeを開く",
-  choose_auto_format: "自動画質でやり直す",
-  retry: "もう一度試す",
-  open_diagnostics: "診断情報を見る",
-};
+// === Remedy buttons =========================================================
 
 async function runAction(action) {
   switch (action) {
@@ -142,11 +172,16 @@ async function runAction(action) {
     case "choose_auto_format":
       els.formatSelect.value = "";
       clearBanners();
+      warnIfNoFfmpeg();
       startDownload();
       break;
     case "retry":
       clearBanners();
-      startDownload();
+      warnIfNoFfmpeg();
+      // Retrying a download when it was the metadata fetch that failed would
+      // start a download of a video the user was never shown.
+      if (state.failedStage === "info") loadVideoInfo(state.url);
+      else startDownload();
       break;
     case "open_diagnostics":
       await showDiagnostics();
@@ -171,62 +206,82 @@ async function init() {
     showSection("not-youtube");
     showError("バックエンドに接続できません。", {
       remedy: "start.bat（Windows）または start.sh を実行してサーバーを起動してください。",
+      action: "retry",
     });
     return;
   }
 
   // Persistent, because it explains a whole class of download failures.
-  if (!state.health.ffmpeg_available) {
-    showWarning(
-      "ffmpegが見つかりません。MP3変換と高画質（1080p以上）の保存にはffmpegが必要です。" +
-        "この状態でも720p程度までは保存できます。"
-    );
-  }
-
+  warnIfNoFfmpeg();
   checkForUpdate(); // fire and forget — must never delay the UI
 
+  // Resolve the tab URL first: a resumed download can still fail, and the
+  // error path drops the user on the video-info section, which is useless
+  // (and its retry button dead) if we never loaded the video.
+  let tab;
+  try {
+    tab = await sendMessage({ type: "GET_VIDEO_URL" });
+  } catch {
+    showSection("not-youtube");
+    showError("拡張機能の内部通信に失敗しました。", {
+      remedy: "ページを再読み込みするか、chrome://extensions で拡張機能を再読み込みしてください。",
+    });
+    return;
+  }
+  state.url = tab?.url || null;
+
   // A download may still be running from a previous popup session.
-  const active = await sendMessage({ type: "GET_ACTIVE_DOWNLOADS" });
+  const active = await sendMessage({ type: "GET_ACTIVE_DOWNLOADS" }).catch(() => null);
   const ids = Object.keys(active?.downloads || {});
   if (ids.length) {
     state.taskId = ids[ids.length - 1];
     showSection("progress-section");
+    if (state.url) loadVideoInfo(state.url, { silent: true });
     poll();
     return;
   }
 
-  const tab = await sendMessage({ type: "GET_VIDEO_URL" });
-  if (!tab?.url) {
+  if (!state.url) {
     showSection("not-youtube");
     return;
   }
-  state.url = tab.url;
   await loadVideoInfo(state.url);
 }
 
+/** Reject (rather than resolve null) when the worker cannot be reached. */
 function sendMessage(message) {
-  return chrome.runtime.sendMessage(message).catch(() => null);
+  return chrome.runtime.sendMessage(message);
 }
 
 // === Video info =============================================================
 
-async function loadVideoInfo(url) {
-  showSection("loading");
-  els.loadingText.textContent = "動画情報を取得中...";
-  clearBanners();
-  if (!state.health?.ffmpeg_available) {
-    showWarning("ffmpegが見つかりません。MP3変換と1080p以上の保存にはffmpegが必要です。");
+/**
+ * @param {object} [opts]
+ * @param {boolean} [opts.silent] Populate the form without taking over the
+ *   view — used to back-fill the video info while a resumed download runs.
+ */
+async function loadVideoInfo(url, { silent = false } = {}) {
+  if (!url) return;
+  if (!silent) {
+    showSection("loading");
+    els.loadingText.textContent = "動画情報を取得中...";
+    clearBanners();
+    warnIfNoFfmpeg();
   }
 
   try {
     const info = await ApiClient.getVideoInfo(url);
     renderVideoInfo(info);
-    showSection("video-info");
+    state.failedStage = null;
+    if (!silent) showSection("video-info");
   } catch (e) {
+    // A silent load must not clobber the banner explaining a download failure.
+    if (silent) return;
+    state.failedStage = "info";
     showSection("not-youtube");
     showError(e.message, {
       remedy: e.remedy,
-      action: e.action,
+      action: e.action || "retry",
       detail: e.detail,
       attempts: e.attempts,
     });
@@ -234,7 +289,8 @@ async function loadVideoInfo(url) {
 }
 
 function renderVideoInfo(info) {
-  els.thumbnail.src = info.thumbnail_url || "";
+  if (info.thumbnail_url) els.thumbnail.src = info.thumbnail_url;
+  else els.thumbnail.removeAttribute("src");
   els.videoTitle.textContent = info.title;
   els.duration.textContent = formatDuration(info.duration_seconds);
   els.channel.textContent = info.channel;
@@ -271,9 +327,17 @@ function formatDuration(seconds) {
 // === Download ===============================================================
 
 async function startDownload() {
-  if (!state.url) return;
+  if (!state.url) {
+    showError("動画のURLを取得できませんでした。", {
+      remedy: "YouTubeの動画ページを開いた状態で、拡張機能のアイコンをクリックしてください。",
+    });
+    els.downloadBtn.disabled = false;
+    return;
+  }
+
   els.downloadBtn.disabled = true;
   clearBanners();
+  warnIfNoFfmpeg();
 
   const request = { url: state.url, audio_only: state.mode === "audio" };
   if (state.mode === "video") {
@@ -281,18 +345,23 @@ async function startDownload() {
   } else {
     request.audio_format = els.audioFormatSelect.value;
   }
-  state.lastRequest = request;
 
   try {
     const { task_id } = await ApiClient.startDownload(request);
     state.taskId = task_id;
     state.pollFailures = 0;
-    sendMessage({ type: "DOWNLOAD_STARTED", taskId: task_id, title: els.videoTitle.textContent });
+    state.failedStage = null;
+    sendMessage({
+      type: "DOWNLOAD_STARTED",
+      taskId: task_id,
+      title: els.videoTitle.textContent,
+    }).catch(() => {});
 
     resetProgress();
     showSection("progress-section");
     poll();
   } catch (e) {
+    state.failedStage = "download";
     showSection("video-info");
     showError(e.message, { remedy: e.remedy, action: e.action, detail: e.detail });
     els.downloadBtn.disabled = false;
@@ -308,6 +377,16 @@ function resetProgress() {
   els.retryNote.classList.add("hidden");
 }
 
+function finishTask() {
+  clearTimeout(state.pollTimer);
+  state.pollTimer = null;
+  if (state.taskId) {
+    sendMessage({ type: "DOWNLOAD_COMPLETED", taskId: state.taskId }).catch(() => {});
+  }
+  state.taskId = null;
+  els.downloadBtn.disabled = false;
+}
+
 /** Poll progress on a timeout chain, so a slow backend cannot pile up requests. */
 async function poll() {
   if (!state.taskId) return;
@@ -319,16 +398,20 @@ async function poll() {
   } catch (e) {
     // 404 means the task is gone for good — almost always a server restart.
     // Retrying forever (as v1 did) just leaves the spinner turning.
-    if (e.status === 404) return stopPolling(
-      "ダウンロードの進捗が分からなくなりました。",
-      "サーバーが再起動された可能性があります。もう一度ダウンロードしてください。"
-    );
+    if (e.status === 404) {
+      return stopPolling(
+        "ダウンロードの進捗が分からなくなりました。",
+        "サーバーが再起動された可能性があります。もう一度ダウンロードしてください。"
+      );
+    }
 
     state.pollFailures += 1;
-    if (state.pollFailures >= 8) return stopPolling(
-      "バックエンドと通信できなくなりました。",
-      "サーバーが動いているか確認してから、もう一度お試しください。"
-    );
+    if (state.pollFailures >= 8) {
+      return stopPolling(
+        `バックエンドと通信できなくなりました（${e.message}）。`,
+        "サーバーが動いているか確認してから、もう一度お試しください。"
+      );
+    }
     state.pollTimer = setTimeout(poll, Math.min(500 * state.pollFailures, 3000));
     return;
   }
@@ -336,19 +419,19 @@ async function poll() {
   renderProgress(task);
 
   if (task.status === "done") {
-    sendMessage({ type: "DOWNLOAD_COMPLETED", taskId: state.taskId });
+    finishTask();
     state.filePath = task.file_path;
     els.doneFilename.textContent = (task.file_path || "").split(/[\\/]/).pop();
     showSection("done-section");
-    els.downloadBtn.disabled = false;
     for (const warning of task.warnings || []) showWarning(warning);
     return;
   }
 
   if (task.status === "error") {
-    sendMessage({ type: "DOWNLOAD_COMPLETED", taskId: state.taskId });
-    // Order matters: switch first, then show. showSection no longer clears
-    // banners, but keeping this order makes the intent obvious.
+    finishTask();
+    state.failedStage = "download";
+    // showSection no longer clears banners, but switching first and showing
+    // second keeps the intent obvious.
     showSection("video-info");
     showError(task.error || "不明なエラーが発生しました。", {
       remedy: task.remedy,
@@ -356,7 +439,6 @@ async function poll() {
       detail: task.error_detail,
       attempts: task.attempts,
     });
-    els.downloadBtn.disabled = false;
     return;
   }
 
@@ -364,13 +446,10 @@ async function poll() {
 }
 
 function stopPolling(message, remedy) {
-  clearTimeout(state.pollTimer);
-  state.pollTimer = null;
-  sendMessage({ type: "DOWNLOAD_COMPLETED", taskId: state.taskId });
-  state.taskId = null;
+  finishTask();
+  state.failedStage = "download";
   showSection("video-info");
   showError(message, { remedy, action: "retry" });
-  els.downloadBtn.disabled = false;
 }
 
 function renderProgress(task) {
@@ -412,8 +491,8 @@ async function applyUpdate() {
     els.updateDismiss.textContent = "閉じる";
   } catch (e) {
     els.updateText.textContent = `更新に失敗しました: ${e.message}`;
-  } finally {
     els.updateBtn.disabled = false;
+    els.updateBtn.textContent = "更新する";
   }
 }
 
@@ -422,6 +501,12 @@ async function applyUpdate() {
 async function showDiagnostics() {
   showSection("diagnostics-section");
   els.diagnosticsText.textContent = "読み込み中...";
+
+  // Kept in sync with YTC_PORT on the server side; without this the extension
+  // could never reach a backend started on a non-default port.
+  const { backendPort = 9160 } = await chrome.storage.local.get("backendPort");
+  els.portInput.value = backendPort;
+
   try {
     const d = await ApiClient.diagnostics();
     const lines = [
@@ -467,7 +552,9 @@ function wireEvents() {
   els.newDownloadBtn.addEventListener("click", () => {
     state.filePath = null;
     clearBanners();
+    warnIfNoFfmpeg();
     if (state.url) loadVideoInfo(state.url);
+    else showSection("not-youtube");
   });
 
   els.errorDismiss.addEventListener("click", () => els.errorBanner.classList.add("hidden"));
@@ -481,13 +568,26 @@ function wireEvents() {
   els.diagnosticsClose.addEventListener("click", () => {
     showSection(state.url ? "video-info" : "not-youtube");
   });
+  els.portSave.addEventListener("click", async () => {
+    const port = Number(els.portInput.value);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      showError("ポート番号が正しくありません。", { remedy: "1〜65535 の数値を入力してください。" });
+      return;
+    }
+    await chrome.storage.local.set({ backendPort: port });
+    els.portSave.textContent = "保存しました";
+    setTimeout(() => (els.portSave.textContent = "保存"), 1500);
+    state.health = null;
+    await showDiagnostics();
+  });
+
   els.diagnosticsCopy.addEventListener("click", () => {
     navigator.clipboard.writeText(els.diagnosticsText.textContent);
     els.diagnosticsCopy.textContent = "コピーしました";
     setTimeout(() => (els.diagnosticsCopy.textContent = "コピー"), 1500);
   });
 
-  window.addEventListener("unload", () => clearTimeout(state.pollTimer));
+  window.addEventListener("pagehide", () => clearTimeout(state.pollTimer));
 }
 
 function setMode(mode) {

@@ -51,9 +51,13 @@ def _is_newer(latest: str, current: str) -> bool:
 
 def _read_cache() -> dict | None:
     try:
-        return json.loads(_cache_path().read_text(encoding="utf-8"))
+        data = json.loads(_cache_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+    # Valid JSON of the wrong shape (a list, a string) would sail past the
+    # exception guard and then blow up on .get(), taking the update check —
+    # the app's whole recovery story — down with it.
+    return data if isinstance(data, dict) else None
 
 
 def _write_cache(payload: dict) -> None:
@@ -129,19 +133,36 @@ def apply_update() -> UpdateInfo:
     global _memo
 
     before = get_yt_dlp_version()
-    completed = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"],
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-
-    if completed.returncode != 0:
-        tail = (completed.stderr or completed.stdout or "").strip().splitlines()[-5:]
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
         return UpdateInfo(
             current=before,
             checked_at=time.time(),
-            note="更新に失敗しました: " + " / ".join(tail),
+            note="更新がタイムアウトしました（5分）。回線を確認するか、"
+            "scripts/update-ytdlp を直接実行してください。",
+        )
+    except OSError as exc:
+        return UpdateInfo(
+            current=before,
+            checked_at=time.time(),
+            note=f"pipを起動できませんでした: {exc}",
+        )
+
+    if completed.returncode != 0:
+        tail = (completed.stderr or completed.stdout or "").strip().splitlines()[-5:]
+        # A signal-killed pip can produce no output at all; without the exit
+        # code the message would end at the colon and say nothing.
+        detail = " / ".join(tail) if tail else f"pip が終了コード {completed.returncode} で失敗しました"
+        return UpdateInfo(
+            current=before,
+            checked_at=time.time(),
+            note="更新に失敗しました: " + detail,
         )
 
     _memo = None  # force a fresh comparison next time

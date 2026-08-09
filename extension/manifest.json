@@ -6,8 +6,8 @@
   "permissions": ["activeTab", "storage"],
   "host_permissions": [
     "https://www.youtube.com/*",
-    "http://localhost:9160/*",
-    "http://127.0.0.1:9160/*"
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "action": {
     "default_popup": "popup/popup.html",
@@ -19,7 +19,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.youtube.com/watch*"],
+      "matches": ["https://www.youtube.com/*"],
       "js": ["lib/api-client.js", "content/content.js"],
       "css": ["content/content.css"],
       "run_at": "document_idle"

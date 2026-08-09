@@ -1,15 +1,20 @@
 /**
  * In-page download button for YouTube watch pages.
  *
- * Two things make this survive YouTube's habit of changing:
+ * Three things make this survive YouTube's habit of changing:
  *   - The anchor is looked up through a list of candidate selectors, and if
- *     none match we simply do nothing. The toolbar popup keeps working, so a
+ *     none match we do nothing at all. The toolbar popup keeps working, so a
  *     YouTube redesign degrades this feature instead of breaking the extension.
  *   - YouTube is a single-page app: navigating between videos never reloads the
  *     document, so we re-inject on `yt-navigate-finish` and on DOM mutations.
+ *     The manifest matches all of youtube.com rather than just /watch, because
+ *     Chrome only matches content scripts at document load — landing on the
+ *     home page and clicking a video would otherwise inject nothing.
+ *   - Backend calls go through the service worker (see lib/api-client.js): a
+ *     content script's fetch carries the page origin, which the backend's CORS
+ *     policy rejects.
  *
- * No YouTube internals are parsed here — only the page URL is read. All
- * extraction happens in the backend.
+ * No YouTube internals are parsed here — only the page URL is read.
  */
 
 (() => {
@@ -24,7 +29,13 @@
     "#menu-container #top-level-buttons-computed",
   ];
 
-  let pollTimer = null;
+  // Identity token for the active progress loop. Replacing it makes any
+  // in-flight `tick` stop; without it, a tick already awaiting a response when
+  // the panel closes would schedule a fresh timer nothing can cancel, and keep
+  // polling into a detached DOM node.
+  let watchToken = null;
+
+  const notify = (message) => chrome.runtime.sendMessage(message).catch(() => {});
 
   // === Injection ============================================================
 
@@ -54,11 +65,53 @@
 
   function removePanel() {
     document.getElementById(PANEL_ID)?.remove();
-    clearTimeout(pollTimer);
-    pollTimer = null;
+    // Stop this panel's progress loop. The download itself keeps running in the
+    // backend and stays listed as active, so the toolbar popup can pick it up.
+    watchToken = null;
   }
 
   // === Panel ================================================================
+
+  function buildPanel() {
+    const panel = document.createElement("div");
+    panel.id = PANEL_ID;
+    panel.className = "ytc-panel";
+
+    const header = document.createElement("div");
+    header.className = "ytc-panel-header";
+    const heading = document.createElement("span");
+    heading.textContent = "YouTube Chushutu";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "ytc-close";
+    close.textContent = "×";
+    close.addEventListener("click", removePanel);
+    header.append(heading, close);
+
+    const body = document.createElement("div");
+    body.className = "ytc-body";
+    const loading = document.createElement("p");
+    loading.className = "ytc-muted";
+    loading.textContent = "動画情報を取得中...";
+    body.appendChild(loading);
+
+    panel.append(header, body);
+    return { panel, body };
+  }
+
+  function showMessage(body, message, remedy = "") {
+    body.replaceChildren();
+    const primary = document.createElement("p");
+    primary.className = "ytc-error";
+    primary.textContent = message;
+    body.appendChild(primary);
+    if (remedy) {
+      const hint = document.createElement("p");
+      hint.className = "ytc-muted";
+      hint.textContent = remedy;
+      body.appendChild(hint);
+    }
+  }
 
   async function togglePanel() {
     if (document.getElementById(PANEL_ID)) {
@@ -66,28 +119,18 @@
       return;
     }
 
-    const panel = document.createElement("div");
-    panel.id = PANEL_ID;
-    panel.className = "ytc-panel";
-    panel.innerHTML = `
-      <div class="ytc-panel-header">
-        <span>YouTube Chushutu</span>
-        <button class="ytc-close" type="button">&times;</button>
-      </div>
-      <div class="ytc-body"><p class="ytc-muted">動画情報を取得中...</p></div>
-    `;
+    const { panel, body } = buildPanel();
     document.body.appendChild(panel);
-    panel.querySelector(".ytc-close").addEventListener("click", removePanel);
-
-    const body = panel.querySelector(".ytc-body");
 
     let health;
     try {
       health = await ApiClient.healthCheck();
-    } catch {
-      body.innerHTML = `
-        <p class="ytc-error">バックエンドに接続できません。</p>
-        <p class="ytc-muted">start.bat を実行してサーバーを起動してください。</p>`;
+    } catch (e) {
+      showMessage(
+        body,
+        e.message || "バックエンドに接続できません。",
+        e.remedy || "start.bat を実行してサーバーを起動してください。"
+      );
       return;
     }
 
@@ -95,65 +138,96 @@
       const info = await ApiClient.getVideoInfo(location.href);
       renderForm(body, info, health);
     } catch (e) {
-      body.innerHTML = `
-        <p class="ytc-error"></p>
-        <p class="ytc-muted"></p>`;
-      body.querySelector(".ytc-error").textContent = e.message;
-      body.querySelector(".ytc-muted").textContent = e.remedy || "";
+      showMessage(body, e.message, e.remedy);
     }
   }
 
   function renderForm(body, info, health) {
-    const videoFormats = info.formats.filter((f) => !f.is_audio_only);
-    const options = [
-      '<option value="">自動（最高画質）</option>',
-      ...videoFormats.map((f) => {
-        const blocked = f.needs_merge && !health.ffmpeg_available;
-        const label = blocked ? `${f.quality_label} — ffmpegが必要` : f.quality_label;
-        return `<option value="${f.format_id}"${blocked ? " disabled" : ""}>${escapeHtml(label)}</option>`;
-      }),
-    ].join("");
+    body.replaceChildren();
 
-    body.innerHTML = `
-      <p class="ytc-title"></p>
-      <div class="ytc-row">
-        <label><input type="radio" name="ytc-mode" value="video" checked> 動画+音声</label>
-        <label><input type="radio" name="ytc-mode" value="audio"> 音声のみ</label>
-      </div>
-      <select class="ytc-select ytc-format">${options}</select>
-      <select class="ytc-select ytc-audio" hidden>
-        <option value="m4a">M4A / AAC（変換なし）</option>
-        <option value="mp3"${health.ffmpeg_available ? "" : " disabled"}>MP3${health.ffmpeg_available ? "" : "（ffmpegが必要）"}</option>
-      </select>
-      ${health.ffmpeg_available ? "" : '<p class="ytc-warn">ffmpegが無いため最高720p程度になります。</p>'}
-      <button class="ytc-go" type="button">ダウンロード</button>
-      <p class="ytc-status"></p>
-    `;
-    body.querySelector(".ytc-title").textContent = info.title;
+    const title = document.createElement("p");
+    title.className = "ytc-title";
+    title.textContent = info.title;
 
-    const formatSelect = body.querySelector(".ytc-format");
-    const audioSelect = body.querySelector(".ytc-audio");
-    body.querySelectorAll('input[name="ytc-mode"]').forEach((radio) => {
+    const modes = document.createElement("div");
+    modes.className = "ytc-row";
+    const radios = {};
+    for (const [value, label] of [["video", "動画+音声"], ["audio", "音声のみ"]]) {
+      const wrapper = document.createElement("label");
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "ytc-mode";
+      radio.value = value;
+      radio.checked = value === "video";
+      radios[value] = radio;
+      wrapper.append(radio, document.createTextNode(` ${label}`));
+      modes.appendChild(wrapper);
+    }
+
+    // Built with the DOM rather than an innerHTML template: format ids come
+    // from the network and would otherwise be interpolated into an attribute.
+    const formatSelect = document.createElement("select");
+    formatSelect.className = "ytc-select ytc-format";
+    formatSelect.appendChild(new Option("自動（最高画質）", ""));
+    for (const fmt of info.formats.filter((f) => !f.is_audio_only)) {
+      const blocked = fmt.needs_merge && !health.ffmpeg_available;
+      const option = new Option(
+        blocked ? `${fmt.quality_label} — ffmpegが必要` : fmt.quality_label,
+        fmt.format_id
+      );
+      option.disabled = blocked;
+      formatSelect.appendChild(option);
+    }
+
+    const audioSelect = document.createElement("select");
+    audioSelect.className = "ytc-select ytc-audio";
+    audioSelect.hidden = true;
+    audioSelect.appendChild(new Option("M4A / AAC（変換なし）", "m4a"));
+    const mp3 = new Option(
+      health.ffmpeg_available ? "MP3" : "MP3（ffmpegが必要）",
+      "mp3"
+    );
+    mp3.disabled = !health.ffmpeg_available;
+    audioSelect.appendChild(mp3);
+
+    for (const radio of Object.values(radios)) {
       radio.addEventListener("change", () => {
-        const audio = radio.value === "audio" && radio.checked;
+        const audio = radios.audio.checked;
         formatSelect.hidden = audio;
         audioSelect.hidden = !audio;
       });
-    });
+    }
 
-    body.querySelector(".ytc-go").addEventListener("click", () =>
-      run(body, {
-        audio: body.querySelector('input[name="ytc-mode"]:checked').value === "audio",
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "ytc-go";
+    go.textContent = "ダウンロード";
+
+    const status = document.createElement("p");
+    status.className = "ytc-status";
+
+    body.append(title, modes, formatSelect, audioSelect);
+    if (!health.ffmpeg_available) {
+      const warn = document.createElement("p");
+      warn.className = "ytc-warn";
+      warn.textContent = "ffmpegが無いため最高720p程度になります。";
+      body.appendChild(warn);
+    }
+    body.append(go, status);
+
+    go.addEventListener("click", () =>
+      run({
+        go,
+        status,
+        audio: radios.audio.checked,
         formatId: formatSelect.value,
         audioFormat: audioSelect.value,
       })
     );
   }
 
-  async function run(body, { audio, formatId, audioFormat }) {
-    const button = body.querySelector(".ytc-go");
-    const status = body.querySelector(".ytc-status");
-    button.disabled = true;
+  async function run({ go, status, audio, formatId, audioFormat }) {
+    go.disabled = true;
     status.className = "ytc-status";
     status.textContent = "開始しています...";
 
@@ -163,75 +237,77 @@
       else if (formatId) request.format_id = formatId;
 
       const { task_id } = await ApiClient.startDownload(request);
-      chrome.runtime.sendMessage({ type: "DOWNLOAD_STARTED", taskId: task_id, title: document.title });
-      watch(task_id, body);
+      notify({ type: "DOWNLOAD_STARTED", taskId: task_id, title: document.title });
+      watch(task_id, { go, status });
     } catch (e) {
       status.className = "ytc-status ytc-error";
       status.textContent = `${e.message} ${e.remedy || ""}`.trim();
-      button.disabled = false;
+      go.disabled = false;
     }
   }
 
-  function watch(taskId, body) {
-    const button = body.querySelector(".ytc-go");
-    const status = body.querySelector(".ytc-status");
+  function watch(taskId, { go, status }) {
+    const token = {};
+    watchToken = token;
     let failures = 0;
 
+    const finish = (className, text) => {
+      watchToken = null;
+      status.className = `ytc-status ${className}`;
+      status.textContent = text;
+      go.disabled = false;
+    };
+
     const tick = async () => {
+      if (watchToken !== token) return;
+
       let task;
       try {
         task = await ApiClient.getProgress(taskId);
         failures = 0;
       } catch (e) {
-        if (e.status === 404 || ++failures >= 8) {
-          status.className = "ytc-status ytc-error";
-          status.textContent = "進捗が取得できなくなりました。サーバーを確認してください。";
-          button.disabled = false;
-          return;
+        if (watchToken !== token) return;
+        if (e.status === 404) {
+          return finish("ytc-error", "進捗が取得できなくなりました（サーバーが再起動された可能性があります）。");
         }
-        pollTimer = setTimeout(tick, 1000);
+        if (++failures >= 8) {
+          return finish("ytc-error", `進捗が取得できなくなりました: ${e.message}`);
+        }
+        pollTimer(tick, 1000);
         return;
       }
 
+      if (watchToken !== token) return;
+
       if (task.status === "done") {
-        chrome.runtime.sendMessage({ type: "DOWNLOAD_COMPLETED", taskId });
-        status.className = "ytc-status ytc-ok";
-        status.textContent = `完了: ${(task.file_path || "").split(/[\\/]/).pop()}`;
-        button.disabled = false;
+        notify({ type: "DOWNLOAD_COMPLETED", taskId });
+        const name = (task.file_path || "").split(/[\\/]/).pop();
+        finish("ytc-ok", `完了: ${name}`);
+        for (const warning of task.warnings || []) {
+          status.textContent += `\n${warning}`;
+        }
         return;
       }
 
       if (task.status === "error") {
-        chrome.runtime.sendMessage({ type: "DOWNLOAD_COMPLETED", taskId });
-        status.className = "ytc-status ytc-error";
-        status.textContent = `${task.error || "エラー"} ${task.remedy || ""}`.trim();
-        button.disabled = false;
-        return;
+        notify({ type: "DOWNLOAD_COMPLETED", taskId });
+        return finish("ytc-error", `${task.error || "エラー"} ${task.remedy || ""}`.trim());
       }
 
       status.textContent =
         task.attempt_note ||
         `${task.percent?.toFixed(1) ?? 0}% ${task.speed || ""} ${task.eta ? "残り " + task.eta : ""}`.trim();
-      pollTimer = setTimeout(tick, 700);
+      pollTimer(tick, 700);
     };
 
     tick();
   }
 
-  function escapeHtml(text) {
-    const div = document.createElement("div");
-    div.textContent = text;
-    return div.innerHTML;
+  function pollTimer(fn, delay) {
+    setTimeout(fn, delay);
   }
 
   // === Lifecycle ============================================================
-
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message.type === "GET_PAGE_URL") {
-      sendResponse({ url: location.href });
-    }
-    return false;
-  });
 
   // SPA navigation: the document never reloads, so re-inject on YouTube's own
   // navigation event and whenever the actions row is re-rendered.
@@ -241,6 +317,8 @@
   });
 
   // YouTube mutates the DOM constantly, so coalesce bursts into one check.
+  // inject() short-circuits on the pathname and an id lookup before running
+  // any selector, so the steady-state cost is negligible.
   let injectTimer = null;
   const observer = new MutationObserver(() => {
     if (injectTimer) return;

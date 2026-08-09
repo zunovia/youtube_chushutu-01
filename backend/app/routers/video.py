@@ -24,7 +24,7 @@ from app.models.schemas import (
 )
 from app.services import updater
 from app.services.downloader import download_manager, ffmpeg_blocking_reason
-from app.services.errors import ErrorCode, classify, recent_errors
+from app.services.errors import ErrorCode, classify, recent_errors, record
 from app.services.extractor import ExtractionError, get_yt_dlp_version
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,7 @@ async def get_video_info(url: str = Query(..., description="YouTube video URL"))
     except Exception as exc:  # noqa: BLE001
         logger.exception("info failed")
         error = classify(exc)
+        record(error, context="info")
         return _error_response(
             ErrorDetail(
                 error_code=error.code,
@@ -94,6 +95,7 @@ async def start_download(request: DownloadRequest):
     blocked = ffmpeg_blocking_reason(request)
     if blocked is ErrorCode.FFMPEG_MISSING:
         error = classify("ffmpeg is not installed")
+        record(error, context="download / ffmpeg事前チェック")
         return _error_response(
             ErrorDetail(
                 error_code=error.code,
@@ -148,15 +150,15 @@ async def diagnostics() -> DiagnosticsResponse:
 async def open_file(body: dict = Body(...)) -> dict:
     """Reveal a downloaded file in the OS file manager."""
     raw_path = body.get("path", "")
-    if not raw_path:
-        raise HTTPException(status_code=400, detail="No path provided")
+    if not raw_path or not isinstance(raw_path, str):
+        raise HTTPException(status_code=400, detail="パスが指定されていません")
 
     target = Path(raw_path).resolve()
     root = Path(settings.download_dir).resolve()
     # This endpoint is reachable from any page that can talk to localhost, so
     # it must only ever reveal files we ourselves downloaded.
     if not target.is_relative_to(root):
-        raise HTTPException(status_code=403, detail="Path outside the download folder")
+        raise HTTPException(status_code=403, detail="保存先フォルダの外は開けません")
 
     try:
         if sys.platform == "darwin":

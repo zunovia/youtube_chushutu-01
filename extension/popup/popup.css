@@ -244,6 +244,9 @@ body {
   margin-bottom: 6px;
 }
 
+.port-row { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+.port-row .select { flex: 1; }
+
 /* === Diagnostics === */
 .diagnostics {
   background: #f7fafc;

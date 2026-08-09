@@ -33,7 +33,14 @@ import yt_dlp
 
 from app.config import settings
 from app.models.schemas import FormatOption, VideoInfo
-from app.services.errors import RETRYABLE, ClassifiedError, ErrorCode, classify, record
+from app.services.errors import (
+    PLAIN_RETRY_ONLY,
+    RETRYABLE,
+    ClassifiedError,
+    ErrorCode,
+    classify,
+    record,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +120,11 @@ def _base_opts() -> dict:
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
+        # A URL like watch?v=X&list=RDX — which is what YouTube produces from a
+        # playlist click or an autoplay Mix — is claimed by the playlist
+        # extractor, not the video one. Without this, /api/info returns playlist
+        # metadata with no formats and a download fetches every entry.
+        "noplaylist": True,
         "retries": settings.ytdl_retries,
         "fragment_retries": settings.ytdl_fragment_retries,
         "extractor_retries": 3,
@@ -317,13 +329,20 @@ class Extractor:
                 )
                 if error.code not in RETRYABLE:
                     break
+
+                nxt = index + 1
+                if nxt >= len(strategies):
+                    break
+                # A malformed URL or a dead socket will not be fixed by reading
+                # the user's cookies, so stop rather than pay for that attempt.
+                if strategies[nxt].cookies and error.code in PLAIN_RETRY_ONLY:
+                    break
                 # Switching player client is a genuinely different request, so
                 # retry it immediately. Only pause before a cookie attempt,
                 # where a rate-limit style block may still be cooling off —
                 # exponential backoff across the whole chain would leave the
                 # user staring at a spinner for half a minute.
-                nxt = index + 1
-                if nxt < len(strategies) and strategies[nxt].cookies:
+                if strategies[nxt].cookies:
                     time.sleep(2)
 
         primary = _primary_error(errors)
@@ -446,10 +465,11 @@ class Extractor:
 
         if not self.ffmpeg_available and audio_format != "m4a":
             # MP3 always requires a transcode; M4A can be saved as-is.
-            raise ExtractionError(
-                classify("ffmpeg is not installed"),
-                ["ffmpeg事前チェック:FFMPEG_MISSING"],
-            )
+            # Recorded explicitly: this raise bypasses the fallback chain, which
+            # is where failures normally reach the diagnostics buffer.
+            error = classify("ffmpeg is not installed")
+            record(error, context="audio / ffmpeg事前チェック")
+            raise ExtractionError(error, ["ffmpeg事前チェック:FFMPEG_MISSING"])
 
         use_postprocessor = self.ffmpeg_available
         if not use_postprocessor:
@@ -487,16 +507,3 @@ class Extractor:
         if settings.cookies_file:
             return Path(settings.cookies_file).is_file()
         return bool(settings.cookie_browser)
-
-
-def preflight_ffmpeg(extractor: Extractor, audio_only: bool, audio_format: str) -> ErrorCode | None:
-    """Reject a request that ffmpeg is required for, before a task is created.
-
-    Returning the failure synchronously means the user sees it immediately
-    instead of after a poll cycle.
-    """
-    if extractor.ffmpeg_available:
-        return None
-    if audio_only and audio_format != "m4a":
-        return ErrorCode.FFMPEG_MISSING
-    return None
