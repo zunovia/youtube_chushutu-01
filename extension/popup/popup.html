@@ -2,94 +2,124 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>YouTube Chushutu</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div id="app">
-    <!-- Header -->
-    <header class="header">
-      <h1>YouTube Chushutu</h1>
-      <span id="status-dot" class="status-dot offline" title="Backend offline"></span>
-    </header>
+<div id="app">
 
-    <!-- Error state -->
-    <div id="error-section" class="section hidden">
-      <p id="error-message" class="error-text"></p>
+  <header class="header">
+    <h1>YouTube Chushutu</h1>
+    <div class="header-right">
+      <button id="diagnostics-btn" class="link-btn" title="診断情報">診断</button>
+      <span id="status-dot" class="status-dot offline" title="バックエンド未接続"></span>
     </div>
+  </header>
 
-    <!-- Not on YouTube -->
-    <div id="not-youtube" class="section hidden">
-      <p class="muted">YouTubeの動画ページを開いてください</p>
-    </div>
-
-    <!-- Loading -->
-    <div id="loading" class="section hidden">
-      <div class="spinner"></div>
-      <p class="muted">動画情報を取得中...</p>
-    </div>
-
-    <!-- Video info -->
-    <div id="video-info" class="section hidden">
-      <img id="thumbnail" class="thumbnail" alt="thumbnail">
-      <h2 id="video-title" class="video-title"></h2>
-      <div class="video-meta">
-        <span id="duration"></span>
-        <span class="separator">|</span>
-        <span id="channel"></span>
-      </div>
-
-      <div class="divider"></div>
-
-      <!-- Mode selection -->
-      <div class="mode-tabs">
-        <button id="tab-video" class="tab active" data-mode="video">動画+音声</button>
-        <button id="tab-audio" class="tab" data-mode="audio">音声のみ</button>
-      </div>
-
-      <!-- Video format selection -->
-      <div id="video-options" class="options">
-        <label class="label">画質:</label>
-        <select id="format-select" class="select"></select>
-      </div>
-
-      <!-- Audio format selection -->
-      <div id="audio-options" class="options hidden">
-        <label class="label">形式:</label>
-        <select id="audio-format-select" class="select">
-          <option value="mp3">MP3</option>
-          <option value="m4a">M4A (AAC)</option>
-        </select>
-      </div>
-
-      <button id="download-btn" class="btn-download">ダウンロード</button>
-    </div>
-
-    <!-- Progress -->
-    <div id="progress-section" class="section hidden">
-      <div class="progress-info">
-        <span id="progress-status">ダウンロード中...</span>
-        <span id="progress-percent">0%</span>
-      </div>
-      <div class="progress-bar-bg">
-        <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
-      </div>
-      <div class="progress-details">
-        <span id="progress-speed"></span>
-        <span id="progress-eta"></span>
+  <!--
+    Banners sit outside the section rotation on purpose. In v1 they lived
+    inside it, so switching sections silently wiped the message that explained
+    what had just gone wrong.
+  -->
+  <div id="banners">
+    <div id="update-banner" class="banner banner-info hidden">
+      <span id="update-text"></span>
+      <div class="banner-actions">
+        <button id="update-btn" class="btn-mini">更新する</button>
+        <button id="update-dismiss" class="btn-mini btn-ghost">後で</button>
       </div>
     </div>
 
-    <!-- Done -->
-    <div id="done-section" class="section hidden">
-      <p class="done-text">ダウンロード完了!</p>
-      <button id="open-file-btn" class="btn-secondary">ファイルを開く</button>
-      <button id="new-download-btn" class="btn-secondary">新しいダウンロード</button>
+    <div id="warning-banner" class="banner banner-warn hidden">
+      <span id="warning-text"></span>
+    </div>
+
+    <div id="error-banner" class="banner banner-error hidden">
+      <button id="error-dismiss" class="banner-close" title="閉じる">&times;</button>
+      <p id="error-text" class="banner-title"></p>
+      <p id="error-remedy" class="banner-remedy"></p>
+      <button id="error-action" class="btn-mini hidden"></button>
+      <details id="error-details" class="banner-details hidden">
+        <summary>詳細</summary>
+        <pre id="error-detail-text"></pre>
+      </details>
     </div>
   </div>
 
-  <script src="../lib/api-client.js"></script>
-  <script src="popup.js"></script>
+  <!-- Sections: exactly one visible at a time -->
+  <div id="not-youtube" class="section hidden">
+    <p class="muted">YouTubeの動画ページを開いてください</p>
+  </div>
+
+  <div id="loading" class="section hidden">
+    <div class="spinner"></div>
+    <p class="muted" id="loading-text">動画情報を取得中...</p>
+  </div>
+
+  <div id="video-info" class="section hidden">
+    <img id="thumbnail" class="thumbnail" alt="">
+    <h2 id="video-title" class="video-title"></h2>
+    <div class="video-meta">
+      <span id="duration"></span>
+      <span class="separator">|</span>
+      <span id="channel"></span>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="mode-tabs">
+      <button id="tab-video" class="tab active">動画+音声</button>
+      <button id="tab-audio" class="tab">音声のみ</button>
+    </div>
+
+    <div id="video-options" class="options">
+      <label class="label" for="format-select">画質</label>
+      <select id="format-select" class="select"></select>
+    </div>
+
+    <div id="audio-options" class="options hidden">
+      <label class="label" for="audio-format-select">形式</label>
+      <select id="audio-format-select" class="select">
+        <option value="mp3">MP3（ffmpegが必要）</option>
+        <option value="m4a">M4A / AAC（変換なし）</option>
+      </select>
+    </div>
+
+    <button id="download-btn" class="btn-download">ダウンロード</button>
+  </div>
+
+  <div id="progress-section" class="section hidden">
+    <div class="progress-info">
+      <span id="progress-status">ダウンロード中...</span>
+      <span id="progress-percent">0%</span>
+    </div>
+    <div class="progress-bar-bg">
+      <div id="progress-bar" class="progress-bar"></div>
+    </div>
+    <div class="progress-details">
+      <span id="progress-speed"></span>
+      <span id="progress-eta"></span>
+    </div>
+    <p id="retry-note" class="retry-note hidden"></p>
+  </div>
+
+  <div id="done-section" class="section hidden">
+    <p class="done-text">ダウンロード完了</p>
+    <p id="done-filename" class="done-filename"></p>
+    <button id="open-file-btn" class="btn-secondary">保存先を開く</button>
+    <button id="new-download-btn" class="btn-secondary">続けてダウンロード</button>
+  </div>
+
+  <div id="diagnostics-section" class="section hidden">
+    <h2 class="section-title">診断情報</h2>
+    <pre id="diagnostics-text" class="diagnostics"></pre>
+    <button id="diagnostics-copy" class="btn-secondary">コピー</button>
+    <button id="diagnostics-close" class="btn-secondary">戻る</button>
+  </div>
+
+</div>
+
+<script src="../lib/api-client.js"></script>
+<script src="popup.js"></script>
 </body>
 </html>

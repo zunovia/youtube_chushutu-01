@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "YouTube Chushutu",
-  "version": "1.0.0",
-  "description": "YouTube動画ダウンロード・音声抽出ツール",
+  "version": "2.0.0",
+  "description": "YouTube動画のダウンロードと音声抽出",
   "permissions": ["activeTab", "storage"],
   "host_permissions": [
     "https://www.youtube.com/*",
-    "http://localhost:9160/*"
+    "http://localhost:9160/*",
+    "http://127.0.0.1:9160/*"
   ],
   "action": {
     "default_popup": "popup/popup.html",
@@ -19,7 +20,8 @@
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/watch*"],
-      "js": ["content/content.js"],
+      "js": ["lib/api-client.js", "content/content.js"],
+      "css": ["content/content.css"],
       "run_at": "document_idle"
     }
   ],

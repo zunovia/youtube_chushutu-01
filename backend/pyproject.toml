@@ -1,14 +1,20 @@
 [project]
 name = "youtube-chushutu-backend"
-version = "1.0.0"
-description = "Local backend for YouTube Chushutu Chrome extension"
+version = "2.0.0"
+description = "Local backend for the YouTube Chushutu Chrome extension"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
+    # Kept as a floating lower bound on purpose: YouTube changes often, and the
+    # fix is almost always "install the newest yt-dlp".
     "yt-dlp>=2025.1.1",
     "pydantic>=2.0",
+    "pydantic-settings>=2.0",
 ]
 
 [project.optional-dependencies]
 dev = ["ruff", "pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

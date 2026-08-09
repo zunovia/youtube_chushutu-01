@@ -3,118 +3,203 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 
 from app.config import settings
 from app.models.schemas import DownloadRequest, DownloadTask
-from app.services.extractor import Extractor
+from app.services.errors import ErrorCode, classify, record
+from app.services.extractor import Extractor, ExtractionError
 
 logger = logging.getLogger(__name__)
 
+_TERMINAL = frozenset({"done", "error"})
+
 
 class DownloadManager:
-    """Manages download tasks with progress tracking."""
+    """Runs downloads in background threads and exposes their progress."""
 
-    def __init__(self) -> None:
+    def __init__(self, extractor: Extractor | None = None) -> None:
         self._tasks: dict[str, DownloadTask] = {}
         self._lock = Lock()
         self._executor = ThreadPoolExecutor(
-            max_workers=settings.max_concurrent_downloads
+            max_workers=settings.max_concurrent_downloads,
+            thread_name_prefix="ytc-download",
         )
-        self._extractor = Extractor()
+        self._extractor = extractor or Extractor()
+
+    @property
+    def extractor(self) -> Extractor:
+        return self._extractor
+
+    # --- Task lifecycle -----------------------------------------------------
 
     def start_download(self, request: DownloadRequest) -> str:
-        """Start a download in a background thread. Returns task_id."""
+        """Queue a download and return its task id."""
+        self._evict()
+
         task_id = str(uuid.uuid4())
-        task = DownloadTask(task_id=task_id, status="pending")
-
+        now = time.time()
         with self._lock:
-            self._tasks[task_id] = task
+            self._tasks[task_id] = DownloadTask(
+                task_id=task_id, status="pending", created_at=now, updated_at=now
+            )
 
-        self._executor.submit(self._run_download, task_id, request)
+        self._executor.submit(self._run, task_id, request)
         return task_id
 
     def get_progress(self, task_id: str) -> DownloadTask | None:
-        """Get current progress for a task."""
         with self._lock:
             return self._tasks.get(task_id)
 
-    def _make_progress_callback(self, task_id: str):
-        """Create a yt-dlp progress hook bound to a task_id."""
+    def _evict(self) -> None:
+        """Drop old finished tasks. Running tasks are never evicted."""
+        cutoff = time.time() - settings.task_retention_seconds
+        with self._lock:
+            stale = [
+                tid
+                for tid, task in self._tasks.items()
+                if task.status in _TERMINAL and task.updated_at < cutoff
+            ]
+            for tid in stale:
+                del self._tasks[tid]
 
-        def callback(d: dict) -> None:
-            with self._lock:
-                task = self._tasks.get(task_id)
-                if task is None:
-                    return
+            if len(self._tasks) > settings.max_tasks:
+                finished = sorted(
+                    (t for t in self._tasks.values() if t.status in _TERMINAL),
+                    key=lambda t: t.updated_at,
+                )
+                for task in finished[: len(self._tasks) - settings.max_tasks]:
+                    self._tasks.pop(task.task_id, None)
 
-                status = d.get("status", "")
-                if status == "downloading":
-                    task.status = "downloading"
-                    # yt-dlp gives downloaded_bytes and total_bytes
-                    total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
-                    downloaded = d.get("downloaded_bytes", 0)
-                    if total and total > 0:
-                        task.percent = round((downloaded / total) * 100, 1)
+    def _update(self, task_id: str, **fields) -> None:
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return
+            for key, value in fields.items():
+                setattr(task, key, value)
+            task.updated_at = time.time()
 
-                    speed = d.get("speed")
-                    if speed:
-                        speed_mb = speed / (1024 * 1024)
-                        task.speed = f"{speed_mb:.1f} MB/s"
+    # --- Callbacks fed to the extractor -------------------------------------
 
-                    eta = d.get("eta")
-                    if eta is not None:
-                        mins, secs = divmod(int(eta), 60)
-                        task.eta = f"{mins}:{secs:02d}"
+    def _progress_hook(self, task_id: str):
+        def hook(payload: dict) -> None:
+            status = payload.get("status", "")
+            if status == "downloading":
+                total = payload.get("total_bytes") or payload.get("total_bytes_estimate") or 0
+                downloaded = payload.get("downloaded_bytes") or 0
+                fields: dict = {"status": "downloading"}
+                if total > 0:
+                    fields["percent"] = round(downloaded / total * 100, 1)
 
-                elif status == "finished":
-                    task.status = "converting"
-                    task.percent = 100.0
+                speed = payload.get("speed")
+                if speed:
+                    fields["speed"] = f"{speed / (1024 * 1024):.1f} MB/s"
 
-        return callback
+                eta = payload.get("eta")
+                if eta is not None:
+                    minutes, seconds = divmod(int(eta), 60)
+                    fields["eta"] = f"{minutes}:{seconds:02d}"
 
-    def _run_download(self, task_id: str, request: DownloadRequest) -> None:
-        """Execute the download (runs in background thread)."""
+                self._update(task_id, **fields)
+            elif status == "finished":
+                # yt-dlp has the bytes; ffmpeg merge/convert may still follow.
+                self._update(task_id, status="converting", percent=100.0, speed="", eta="")
+
+        return hook
+
+    def _attempt_hook(self, task_id: str):
+        def hook(index: int, total: int, name: str) -> None:
+            note = "" if index == 1 else f"再試行中 ({index}/{total}): {name}"
+            # Reset progress so a retry does not appear to run backwards.
+            self._update(
+                task_id,
+                attempt=index,
+                max_attempts=total,
+                attempt_note=note,
+                percent=0.0 if index > 1 else 0.0,
+                speed="",
+                eta="",
+            )
+
+        return hook
+
+    # --- Worker -------------------------------------------------------------
+
+    def _run(self, task_id: str, request: DownloadRequest) -> None:
+        self._update(task_id, status="downloading")
+        progress = self._progress_hook(task_id)
+        attempt = self._attempt_hook(task_id)
+
         try:
-            with self._lock:
-                task = self._tasks.get(task_id)
-                if task:
-                    task.status = "downloading"
-
-            progress_cb = self._make_progress_callback(task_id)
-
             if request.audio_only:
-                result_path = self._extractor.download_audio(
+                result = self._extractor.download_audio(
                     url=request.url,
                     audio_format=request.audio_format,
                     output_dir=settings.download_dir,
-                    progress_callback=progress_cb,
+                    progress_callback=progress,
+                    on_attempt=attempt,
                 )
             else:
-                result_path = self._extractor.download(
+                result = self._extractor.download(
                     url=request.url,
                     format_id=request.format_id,
                     output_dir=settings.download_dir,
-                    progress_callback=progress_cb,
+                    progress_callback=progress,
+                    on_attempt=attempt,
                 )
 
-            with self._lock:
-                task = self._tasks.get(task_id)
-                if task:
-                    task.status = "done"
-                    task.percent = 100.0
-                    task.file_path = str(result_path)
+            self._update(
+                task_id,
+                status="done",
+                percent=100.0,
+                file_path=str(result.path),
+                warnings=result.warnings,
+                attempt_note="",
+                speed="",
+                eta="",
+            )
 
-        except Exception as e:
-            logger.exception("Download failed for task %s", task_id)
-            with self._lock:
-                task = self._tasks.get(task_id)
-                if task:
-                    task.status = "error"
-                    task.error = str(e)
+        except ExtractionError as exc:
+            logger.warning("task %s failed: %s", task_id, exc.classified.code.value)
+            self._fail(task_id, exc.classified, exc.attempts)
+
+        except Exception as exc:  # noqa: BLE001 — nothing may escape unreported
+            logger.exception("task %s failed unexpectedly", task_id)
+            error = classify(exc)
+            record(error, context="download")
+            self._fail(task_id, error, [])
+
+    def _fail(self, task_id: str, error, attempts: list[str]) -> None:
+        self._update(
+            task_id,
+            status="error",
+            error_code=error.code,
+            error=error.message,
+            remedy=error.remedy,
+            action=error.action,
+            error_detail=error.raw[:2000],
+            attempts=attempts,
+            attempt_note="",
+            speed="",
+            eta="",
+        )
 
 
-# Singleton instance
 download_manager = DownloadManager()
+
+
+def ffmpeg_blocking_reason(request: DownloadRequest) -> ErrorCode | None:
+    """Return a code when the request cannot possibly succeed without ffmpeg.
+
+    Checked before a task is created so the user gets the answer immediately
+    rather than after a poll cycle.
+    """
+    if download_manager.extractor.ffmpeg_available:
+        return None
+    if request.audio_only and request.audio_format != "m4a":
+        return ErrorCode.FFMPEG_MISSING
+    return None
