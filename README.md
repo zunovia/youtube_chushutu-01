@@ -45,7 +45,7 @@ yt-dlpに触れるのは `backend/app/services/extractor.py` 1ファイルだけ
 
 ### 方法A: ZIPをダウンロード（gitが不要・おすすめ）
 
-1. **[youtube_chushutu-01-v2.0.0.zip をダウンロード](https://github.com/zunovia/youtube_chushutu-01/archive/refs/tags/v2.0.0.zip)**
+1. **[v2.0.0 をダウンロード](https://github.com/zunovia/youtube_chushutu-01/archive/refs/heads/v2.0.0.zip)**
 2. 展開する（`C:\YouTubeChushutu` など、日本語やスペースを含まない場所を推奨）
 3. **Windows**: `scripts\install.bat` をダブルクリック
    **macOS / Linux**: `./scripts/install.sh`
