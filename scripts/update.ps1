@@ -39,7 +39,10 @@ try {
         if (Test-Path (Join-Path $candidate "start.bat")) { $ProjectDir = $candidate }
         else { $ProjectDir = (Get-Location).Path }
     }
-    $ProjectDir = (Resolve-Path $ProjectDir).Path.TrimEnd('\')
+    # GetFullPath folds the trailing \. that update.bat passes (it avoids a
+    # trailing backslash escaping the closing quote) so the venv path below
+    # compares equal to what a running python.exe reports.
+    $ProjectDir = [System.IO.Path]::GetFullPath((Resolve-Path $ProjectDir).Path).TrimEnd('\')
     if (-not (Test-Path (Join-Path $ProjectDir "backend\pyproject.toml"))) {
         Fail "This does not look like a YouTube Chushutu folder:`n  $ProjectDir`nPut update.bat next to start.bat and run it from there."
     }
