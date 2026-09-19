@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from app.services.errors import ClassifiedError, ErrorCode, classify
-from app.services.extractor import Extractor, ExtractionError, _primary_error
+from app.services.extractor import Extractor, ExtractionError, JsRuntime, _primary_error
 
 
 def _run(extractor: Extractor, errors: list[str]):
@@ -87,3 +87,63 @@ def test_primary_error_prefers_the_earliest_on_a_tie() -> None:
         classify("Video unavailable"),
     ]
     assert _primary_error(errors).code is ErrorCode.FORMAT_UNAVAILABLE
+
+
+# --- Missing JavaScript runtime ----------------------------------------------
+#
+# YouTube never says "you have no runtime"; it 403s or withholds formats. On a
+# machine without one, those failures must point at the runtime, because the
+# usual remedy ("update yt-dlp") may already have been done.
+
+
+def _without_runtime() -> Extractor:
+    extractor = Extractor()
+    extractor._js_runtime = None
+    return extractor
+
+
+def _with_runtime() -> Extractor:
+    extractor = Extractor()
+    extractor._js_runtime = JsRuntime(name="deno", path="/x/deno", version="2.9.7")
+    return extractor
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "HTTP Error 403: Forbidden",
+        "nsig extraction failed: Some formats may be missing",
+        "Requested format is not available",
+    ],
+)
+def test_runtime_shaped_failures_are_reattributed_without_a_runtime(message: str) -> None:
+    extractor = _without_runtime()
+    run, _calls = _run(extractor, [message] * 10)
+
+    with pytest.raises(ExtractionError) as excinfo:
+        extractor._run_with_fallback(run, context="test")
+
+    error = excinfo.value.classified
+    assert error.code is ErrorCode.JS_RUNTIME_MISSING
+    assert message in error.raw, "the original yt-dlp text must survive for 詳細"
+
+
+def test_same_failures_keep_their_code_when_a_runtime_exists() -> None:
+    extractor = _with_runtime()
+    run, _calls = _run(extractor, ["HTTP Error 403: Forbidden"] * 10)
+
+    with pytest.raises(ExtractionError) as excinfo:
+        extractor._run_with_fallback(run, context="test")
+
+    assert excinfo.value.classified.code is ErrorCode.HTTP_FORBIDDEN
+
+
+def test_unrelated_failures_are_not_blamed_on_the_runtime() -> None:
+    """A private video is private; installing Deno will not change that."""
+    extractor = _without_runtime()
+    run, _calls = _run(extractor, ["Private video"] * 10)
+
+    with pytest.raises(ExtractionError) as excinfo:
+        extractor._run_with_fallback(run, context="test")
+
+    assert excinfo.value.classified.code is ErrorCode.PRIVATE_VIDEO

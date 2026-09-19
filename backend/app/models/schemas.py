@@ -98,6 +98,10 @@ class UpdateInfo(BaseModel):
     from_cache: bool = False
     restart_required: bool = False
     note: str = ""
+    # True when yt-dlp itself may be current but the JavaScript runtime it
+    # needs for YouTube is absent. The popup treats it like an available update
+    # because the fix is the same button.
+    js_runtime_missing: bool = False
 
 
 class DiagnosticsResponse(BaseModel):
@@ -106,6 +110,7 @@ class DiagnosticsResponse(BaseModel):
     yt_dlp_version: str
     ffmpeg_available: bool
     ffmpeg_path: str | None = None
+    js_runtime: str | None = None  # 例: "deno 2.9.7 (C:\...\deno.exe)"。無ければ None
     cookie_browser: str
     download_dir: str
     python_version: str
@@ -119,5 +124,9 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     yt_dlp_version: str = ""
     ffmpeg_available: bool = False
+    # YouTube needs a JavaScript runtime since late 2025. Surfaced here so the
+    # popup can warn before the first download fails, the way it does for ffmpeg.
+    js_runtime_available: bool = False
+    js_runtime: str | None = None
     cookies_configured: bool = False
     download_dir: str = ""

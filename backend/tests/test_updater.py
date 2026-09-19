@@ -17,6 +17,13 @@ from app.services import updater
 def _isolate_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(updater.settings, "cache_dir", str(tmp_path))
     monkeypatch.setattr(updater, "_memo", None)
+    # The runtime check shells out to whatever is installed on this machine;
+    # tests of the version logic must not depend on that.
+    from app.services.extractor import JsRuntime  # noqa: PLC0415
+
+    monkeypatch.setattr(
+        updater, "detect_js_runtime", lambda: JsRuntime(name="deno", path="/x/deno", version="2.9.7")
+    )
     yield
 
 
@@ -113,3 +120,68 @@ def test_pip_failure_with_no_output_still_explains(monkeypatch) -> None:
 def test_cache_roundtrip() -> None:
     updater._write_cache({"latest": "2026.07.04", "checked_at": 1.0})
     assert json.loads(updater._cache_path().read_text())["latest"] == "2026.07.04"
+
+
+# --- JavaScript runtime ------------------------------------------------------
+
+
+def test_missing_runtime_is_reported_as_an_available_update(monkeypatch) -> None:
+    """yt-dlp being current is not enough; the popup must still offer the button."""
+    monkeypatch.setattr(updater, "detect_js_runtime", lambda: None)
+    monkeypatch.setattr(updater, "_fetch_latest", lambda: updater.get_yt_dlp_version())
+
+    info = updater.check_for_update(force=True)
+
+    assert info.update_available is True
+    assert info.js_runtime_missing is True
+    assert "Deno" in info.note
+
+
+def test_present_runtime_does_not_nag(monkeypatch) -> None:
+    monkeypatch.setattr(updater, "_fetch_latest", lambda: updater.get_yt_dlp_version())
+    info = updater.check_for_update(force=True)
+    assert info.update_available is False
+    assert info.js_runtime_missing is False
+
+
+def test_apply_update_upgrades_the_solver_bundle_and_installs_the_runtime(monkeypatch) -> None:
+    """A bare `pip install -U yt-dlp` would leave yt-dlp-ejs and Deno behind."""
+    import subprocess
+
+    calls: list[list[str]] = []
+
+    def fake_run(args, **_kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(updater.subprocess, "run", fake_run)
+    monkeypatch.setattr(updater, "_fetch_latest", lambda: "2099.01.01")
+
+    info = updater.apply_update()
+
+    targets = [args[-1] for args in calls]
+    assert targets == [updater.PIP_TARGET, updater.PIP_RUNTIME]
+    assert targets[0].startswith("yt-dlp[default]")
+    assert info.restart_required is True
+    assert info.js_runtime_missing is False
+
+
+def test_runtime_install_failure_is_explained_not_hidden(monkeypatch) -> None:
+    """No Deno wheel for this machine: yt-dlp is upgraded, and the note says what is left."""
+    import subprocess
+
+    def fake_run(args, **_kwargs):
+        failed = args[-1] == updater.PIP_RUNTIME
+        return subprocess.CompletedProcess(
+            args=args, returncode=1 if failed else 0, stdout="", stderr="No matching distribution found for deno"
+        )
+
+    monkeypatch.setattr(updater.subprocess, "run", fake_run)
+    monkeypatch.setattr(updater, "_fetch_latest", lambda: "2099.01.01")
+    monkeypatch.setattr(updater, "detect_js_runtime", lambda: None)
+
+    info = updater.apply_update()
+
+    assert info.restart_required is True, "the yt-dlp upgrade itself succeeded"
+    assert info.js_runtime_missing is True
+    assert "Deno" in info.note and "Node.js" in info.note

@@ -15,3 +15,6 @@
 *.md text eol=lf
 
 *.png binary
+
+# PowerShell reads either ending; CRLF matches what Windows editors expect.
+*.ps1 text eol=crlf

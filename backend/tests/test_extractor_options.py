@@ -45,3 +45,14 @@ def test_cookie_strategies_are_last() -> None:
             seen_cookie = True
         elif seen_cookie:
             raise AssertionError("a cookie-less strategy runs after a cookie one")
+
+
+def test_js_runtimes_are_all_enabled() -> None:
+    """yt-dlp enables only Deno by default; a machine with just Node must still work."""
+    opts = _base_opts()
+    assert {"deno", "node", "bun", "quickjs"} <= set(opts["js_runtimes"])
+
+
+def test_solver_script_can_fall_back_to_github() -> None:
+    """If yt-dlp and yt-dlp-ejs drift apart, the matching script must be fetchable."""
+    assert "ejs:github" in _base_opts()["remote_components"]

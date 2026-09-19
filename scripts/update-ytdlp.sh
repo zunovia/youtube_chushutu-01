@@ -23,7 +23,10 @@ echo "現在のバージョン:"
 
 echo ""
 echo "最新版にアップデート中..."
-"$VENV_PIP" install --upgrade yt-dlp -q
+# [default] にはチャレンジ解決スクリプト (yt-dlp-ejs) が含まれる。
+"$VENV_PIP" install --upgrade "yt-dlp[default]" -q
+# それを動かすJSランタイム。64bit以外には無いので失敗しても続行。
+"$VENV_PIP" install --upgrade deno -q || echo "[WARN] Denoを導入できませんでした（Node.js 22以上でも代用可）"
 
 echo ""
 echo "更新後のバージョン:"
@@ -31,4 +34,5 @@ echo "更新後のバージョン:"
 
 echo ""
 echo "完了! バックエンドサーバーを再起動してください。"
+echo "（拡張機能も含めた全体の更新は update.sh を使ってください）"
 echo ""

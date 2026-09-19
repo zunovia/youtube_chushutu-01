@@ -23,7 +23,10 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 import shutil
+import subprocess
+import sysconfig
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,6 +42,7 @@ from app.services.errors import (
     ClassifiedError,
     ErrorCode,
     classify,
+    describe,
     record,
 )
 
@@ -51,6 +55,87 @@ AttemptHook = Callable[[int, int, str], None]
 def get_yt_dlp_version() -> str:
     """Return the installed yt-dlp version string."""
     return yt_dlp.version.__version__
+
+
+# --- JavaScript runtime ------------------------------------------------------
+#
+# Since late 2025 YouTube's player hands out challenges that must be solved by
+# running JavaScript; yt-dlp does that through an external runtime. Without one
+# it falls back to a JS-less client and either 403s or silently loses formats.
+# We ship Deno as a pip package (see pyproject), which lands in the venv's
+# scripts directory — the first place yt-dlp looks — so no PATH setup is needed.
+
+# yt-dlp's own priority order.
+_JS_RUNTIMES = ("deno", "node", "bun", "quickjs")
+_RUNTIME_EXE = {"deno": "deno", "node": "node", "bun": "bun", "quickjs": "qjs"}
+# Mirrors yt-dlp's MIN_SUPPORTED_VERSION so we never report a runtime it rejects.
+_RUNTIME_MIN = {"deno": (2, 3, 0), "node": (22, 0, 0), "bun": (1, 2, 11), "quickjs": (2023, 12, 9)}
+
+
+@dataclass(frozen=True)
+class JsRuntime:
+    name: str
+    path: str
+    version: str
+
+    @property
+    def summary(self) -> str:
+        return f"{self.name} {self.version} ({self.path})"
+
+
+def bundled_deno_path() -> str | None:
+    """The Deno that pip installed into this environment, if any."""
+    exe = "deno" + (sysconfig.get_config_var("EXE") or "")
+    candidate = Path(sysconfig.get_path("scripts")) / exe
+    return str(candidate) if candidate.is_file() else None
+
+
+def _probe_runtime(name: str, path: str) -> str | None:
+    """Run the executable and return its version, or None if it does not work."""
+    # quickjs has no --version; --help prints the version and exits 1.
+    args = [path, "--help"] if name == "quickjs" else [path, "--version"]
+    try:
+        completed = subprocess.run(args, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    output = (completed.stdout or "") + (completed.stderr or "")
+    match = re.search(r"(\d+(?:\.\d+)+)", output)
+    if not match:
+        return None
+    version = match.group(1)
+    parts = tuple(int(p) for p in version.split("."))
+    minimum = _RUNTIME_MIN[name]
+    if parts + (0,) * (len(minimum) - len(parts)) < minimum:
+        return None
+    return version
+
+
+def detect_js_runtime() -> JsRuntime | None:
+    """Find the first runtime yt-dlp would accept, preferring the bundled Deno."""
+    for name in _JS_RUNTIMES:
+        path = (bundled_deno_path() if name == "deno" else None) or shutil.which(_RUNTIME_EXE[name])
+        if not path:
+            continue
+        version = _probe_runtime(name, path)
+        if version:
+            return JsRuntime(name=name, path=path, version=version)
+    return None
+
+
+def _js_runtime_opts() -> dict:
+    """yt-dlp `js_runtimes`: enable every runtime, pointing Deno at our copy.
+
+    yt-dlp enables only Deno by default. Enabling the others costs nothing when
+    they are absent and means a machine that happens to have Node keeps working
+    even if the Deno wheel could not be installed.
+    """
+    deno = bundled_deno_path()
+    return {
+        "deno": {"path": deno} if deno else {},
+        "node": {},
+        "bun": {},
+        "quickjs": {},
+    }
 
 
 class ExtractionError(Exception):
@@ -136,6 +221,12 @@ def _base_opts() -> dict:
         "windowsfilenames": True,
         "trim_file_name": 120,
         "ignoreerrors": False,
+        "js_runtimes": _js_runtime_opts(),
+        # The challenge-solver script normally comes from the yt-dlp-ejs package
+        # installed alongside yt-dlp. If the two ever drift apart (a bare
+        # `pip install -U yt-dlp`), let yt-dlp fetch the matching, hash-verified
+        # script from its GitHub releases instead of failing.
+        "remote_components": ["ejs:github"],
     }
     if settings.proxy:
         opts["proxy"] = settings.proxy
@@ -156,6 +247,7 @@ def _simulated_failure(attempt_index: int) -> None:
     canned = {
         "BOT_CHECK": "ERROR: [youtube] test: Sign in to confirm you're not a bot",
         "OUTDATED_YTDLP": "ERROR: [youtube] test: nsig extraction failed",
+        "JS_RUNTIME_MISSING": "ERROR: [youtube] test: No supported JavaScript runtime could be found",
         "HTTP_FORBIDDEN": "ERROR: unable to download video data: HTTP Error 403: Forbidden",
         "FFMPEG_MISSING": (
             "ERROR: You have requested merging of multiple formats "
@@ -181,6 +273,13 @@ def _simulated_failure(attempt_index: int) -> None:
 # one of these hides the real cause: if four attempts said 403 and the fifth
 # could not open the cookie store, the user needs to hear about the 403.
 _INFRASTRUCTURE = frozenset({ErrorCode.COOKIE_LOCKED})
+
+# What a missing JavaScript runtime looks like from the outside. YouTube does
+# not say "you have no runtime"; it refuses the stream URLs or withholds the
+# formats, so these are the codes we re-attribute when no runtime is present.
+_RUNTIME_SHAPED = frozenset(
+    {ErrorCode.HTTP_FORBIDDEN, ErrorCode.OUTDATED_YTDLP, ErrorCode.FORMAT_UNAVAILABLE}
+)
 
 
 def _primary_error(errors: list[ClassifiedError]) -> ClassifiedError:
@@ -269,7 +368,23 @@ class Extractor:
 
     def __init__(self) -> None:
         self._ffmpeg_path: str | None = None
+        self._js_runtime: JsRuntime | None = None
         self.refresh_ffmpeg()
+        self.refresh_js_runtime()
+
+    # --- JavaScript runtime -------------------------------------------------
+
+    def refresh_js_runtime(self) -> None:
+        """Re-check for a runtime (the update button installs one while we run)."""
+        self._js_runtime = detect_js_runtime()
+
+    @property
+    def js_runtime_available(self) -> bool:
+        return self._js_runtime is not None
+
+    @property
+    def js_runtime_summary(self) -> str | None:
+        return self._js_runtime.summary if self._js_runtime else None
 
     # --- ffmpeg -------------------------------------------------------------
 
@@ -346,6 +461,10 @@ class Extractor:
                     time.sleep(2)
 
         primary = _primary_error(errors)
+        if primary.code in _RUNTIME_SHAPED and not self.js_runtime_available:
+            # Telling the user to update yt-dlp would send them in circles: it
+            # may already be current. The missing piece is the runtime.
+            primary = describe(ErrorCode.JS_RUNTIME_MISSING, raw=primary.raw)
         record(primary, context=f"{context} / {' → '.join(attempts)}")
         raise ExtractionError(primary, attempts)
 

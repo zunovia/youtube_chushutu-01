@@ -23,6 +23,7 @@ class ErrorCode(str, Enum):
 
     BOT_CHECK = "BOT_CHECK"
     OUTDATED_YTDLP = "OUTDATED_YTDLP"
+    JS_RUNTIME_MISSING = "JS_RUNTIME_MISSING"
     HTTP_FORBIDDEN = "HTTP_FORBIDDEN"
     POSTPROCESS_ERROR = "POSTPROCESS_ERROR"
     AGE_RESTRICTED = "AGE_RESTRICTED"
@@ -115,6 +116,16 @@ _RULES: list[tuple[ErrorCode, re.Pattern[str]]] = [
             re.I,
         ),
     ),
+    # Before OUTDATED_YTDLP: the runtime warnings also talk about signatures
+    # and missing formats, but updating yt-dlp alone does not fix them.
+    (
+        ErrorCode.JS_RUNTIME_MISSING,
+        re.compile(
+            r"javascript runtime|js runtime|js-runtimes|challenge solv|n challenge"
+            r"|sig challenge|yt-dlp-ejs|remote[- ]components?|\bejs\b",
+            re.I,
+        ),
+    ),
     (
         ErrorCode.OUTDATED_YTDLP,
         re.compile(
@@ -195,6 +206,12 @@ _MESSAGES: dict[ErrorCode, tuple[str, str, str]] = {
         "「yt-dlpを更新」を押して最新版にしてから、サーバーを再起動してください。",
         ACTION_UPDATE,
     ),
+    ErrorCode.JS_RUNTIME_MISSING: (
+        "YouTubeの新しい仕様に対応するための部品（Deno）が入っていません。",
+        "「更新する」を押すと自動で導入されます（フォルダ内の update.bat でも可）。"
+        "導入後にサーバーを再起動してください。",
+        ACTION_UPDATE,
+    ),
     ErrorCode.HTTP_FORBIDDEN: (
         "YouTubeにアクセスを拒否されました（HTTP 403）。",
         "yt-dlpが古いと発生しやすいエラーです。「yt-dlpを更新」を押して"
@@ -269,6 +286,17 @@ def _strip_noise(text: str) -> str:
     text = re.sub(r"\x1b\[[0-9;]*m", "", text)
     text = re.sub(r"^\s*(ERROR|WARNING):\s*", "", text, flags=re.I | re.M)
     return text.strip()
+
+
+def describe(code: ErrorCode, raw: str = "") -> ClassifiedError:
+    """Build the user-facing error for a code we have already determined.
+
+    Used when the cause is known from context rather than from yt-dlp's text —
+    e.g. a 403 on a machine with no JavaScript runtime is a runtime problem,
+    whatever the HTTP layer says.
+    """
+    message, remedy, action = _MESSAGES[code]
+    return ClassifiedError(code=code, message=message, remedy=remedy, raw=raw, action=action)
 
 
 def classify(exc: BaseException | str) -> ClassifiedError:

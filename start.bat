@@ -22,12 +22,14 @@ echo =========================================
 echo.
 
 cd /d "%BACKEND_DIR%"
-"%VENV_PYTHON%" -c "import sys, shutil; sys.path.insert(0,'.'); import yt_dlp; from app.config import settings; print(f'  yt-dlp:  {yt_dlp.version.__version__}'); print('  ffmpeg:  ' + (shutil.which('ffmpeg') or 'NOT FOUND - MP3 and 1080p+ unavailable')); print(f'  URL:     http://localhost:{settings.port}'); print(f'  API Doc: http://localhost:{settings.port}/docs')"
+"%VENV_PYTHON%" -c "import sys, shutil; sys.path.insert(0,'.'); import yt_dlp; from app.config import settings; from app.services.extractor import detect_js_runtime; rt = detect_js_runtime(); print(f'  yt-dlp:  {yt_dlp.version.__version__}'); print('  Deno:    ' + (rt.summary if rt else 'NOT FOUND - YouTube needs it. Run update.bat')); print('  ffmpeg:  ' + (shutil.which('ffmpeg') or 'NOT FOUND - MP3 and 1080p+ unavailable')); print(f'  URL:     http://localhost:{settings.port}'); print(f'  API Doc: http://localhost:{settings.port}/docs')"
 
 echo.
 echo   Chrome extension folder - load this in chrome://extensions
 echo     %SCRIPT_DIR%extension
 echo   Turn on Developer mode, click "Load unpacked", then pick that folder.
+echo.
+echo   To update (YouTube changed / errors): run update.bat in this folder.
 echo.
 echo Close this window or press Ctrl+C to stop.
 echo =========================================

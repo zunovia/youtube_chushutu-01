@@ -26,7 +26,10 @@ echo Current version:
 
 echo.
 echo Updating to latest...
-"%VENV_PIP%" install --upgrade yt-dlp -q
+REM [default] carries yt-dlp-ejs, the solver script that must match yt-dlp.
+"%VENV_PIP%" install --upgrade "yt-dlp[default]" -q
+REM The JS runtime that runs it. Best effort: 64-bit only.
+"%VENV_PIP%" install --upgrade deno -q
 
 echo.
 echo Updated version:
@@ -34,5 +37,6 @@ echo Updated version:
 
 echo.
 echo Done! Please restart the backend server.
+echo (For a full update including the extension, run update.bat instead.)
 echo.
 pause

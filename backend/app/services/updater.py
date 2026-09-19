@@ -23,11 +23,24 @@ from pathlib import Path
 
 from app.config import settings
 from app.models.schemas import UpdateInfo
-from app.services.extractor import get_yt_dlp_version
+from app.services.extractor import detect_js_runtime, get_yt_dlp_version
 
 logger = logging.getLogger(__name__)
 
 _memo: UpdateInfo | None = None
+
+# What "update" installs. [default] carries yt-dlp-ejs, the challenge-solver
+# script that must match the yt-dlp version; upgrading bare yt-dlp would leave
+# it behind. Deno is the runtime that executes the script — installed second
+# and best-effort, because it has wheels only for mainstream platforms and a
+# missing wheel must not roll back the yt-dlp upgrade.
+PIP_TARGET = "yt-dlp[default]"
+PIP_RUNTIME = "deno"
+
+_RUNTIME_NOTE = (
+    "YouTubeの新しい仕様に対応するための部品（Deno）が入っていません。"
+    "「更新する」を押すと自動で導入されます。"
+)
 
 
 def _cache_path() -> Path:
@@ -81,6 +94,21 @@ def _fetch_latest() -> str | None:
 
 
 def check_for_update(force: bool = False) -> UpdateInfo:
+    """Compare the installed yt-dlp against PyPI, and check the JS runtime.
+
+    A missing runtime is reported as an available update: the popup's button
+    is the same either way, and "you are up to date" would be a lie the user
+    only discovers when the next download fails.
+    """
+    info = _check_ytdlp_version(force)
+    if detect_js_runtime() is None:
+        return info.model_copy(
+            update={"update_available": True, "js_runtime_missing": True, "note": _RUNTIME_NOTE}
+        )
+    return info
+
+
+def _check_ytdlp_version(force: bool) -> UpdateInfo:
     """Compare the installed yt-dlp against PyPI, caching for a day."""
     global _memo
 
@@ -128,18 +156,29 @@ def check_for_update(force: bool = False) -> UpdateInfo:
     return info
 
 
+def _pip_install(target: str, timeout: int) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--upgrade", target],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _pip_failure_detail(completed: subprocess.CompletedProcess) -> str:
+    tail = (completed.stderr or completed.stdout or "").strip().splitlines()[-5:]
+    # A signal-killed pip can produce no output at all; without the exit
+    # code the message would end at the colon and say nothing.
+    return " / ".join(tail) if tail else f"pip が終了コード {completed.returncode} で失敗しました"
+
+
 def apply_update() -> UpdateInfo:
-    """Run pip to upgrade yt-dlp in this interpreter's environment."""
+    """Run pip to upgrade yt-dlp (and install its JS runtime) in this environment."""
     global _memo
 
     before = get_yt_dlp_version()
     try:
-        completed = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
+        completed = _pip_install(PIP_TARGET, timeout=300)
     except subprocess.TimeoutExpired:
         return UpdateInfo(
             current=before,
@@ -155,18 +194,35 @@ def apply_update() -> UpdateInfo:
         )
 
     if completed.returncode != 0:
-        tail = (completed.stderr or completed.stdout or "").strip().splitlines()[-5:]
-        # A signal-killed pip can produce no output at all; without the exit
-        # code the message would end at the colon and say nothing.
-        detail = " / ".join(tail) if tail else f"pip が終了コード {completed.returncode} で失敗しました"
         return UpdateInfo(
             current=before,
             checked_at=time.time(),
-            note="更新に失敗しました: " + detail,
+            note="更新に失敗しました: " + _pip_failure_detail(completed),
         )
+
+    # The runtime. Deno is ~40MB, so give it longer; and if there is no wheel
+    # for this machine, say so rather than pretending the update was complete.
+    runtime_note = ""
+    try:
+        runtime_result = _pip_install(PIP_RUNTIME, timeout=600)
+        if runtime_result.returncode != 0:
+            runtime_note = "Denoを自動導入できませんでした: " + _pip_failure_detail(runtime_result)
+    except subprocess.TimeoutExpired:
+        runtime_note = "Denoの導入がタイムアウトしました。回線を確認してもう一度お試しください。"
+    except OSError as exc:
+        runtime_note = f"Denoの導入でpipを起動できませんでした: {exc}"
 
     _memo = None  # force a fresh comparison next time
     latest = _fetch_latest()
+    runtime = detect_js_runtime()
+
+    if runtime_note and runtime is None:
+        note = (
+            "yt-dlpは更新しましたが、" + runtime_note
+            + " Node.js 22以上をインストールしても代わりに使えます。"
+        )
+    else:
+        note = "更新しました。サーバーを再起動すると新しいバージョンが有効になります。"
 
     # The already-imported yt_dlp module still holds the old code, so the new
     # version only takes effect once the server process is restarted.
@@ -176,5 +232,6 @@ def apply_update() -> UpdateInfo:
         update_available=False,
         checked_at=time.time(),
         restart_required=True,
-        note="更新しました。サーバーを再起動すると新しいバージョンが有効になります。",
+        note=note,
+        js_runtime_missing=runtime is None,
     )

@@ -97,6 +97,13 @@ const FFMPEG_WARNING =
   "ffmpegが見つかりません。MP3変換と高画質（1080p以上）の保存にはffmpegが必要です。" +
   "この状態でも720p程度までは保存できます。";
 
+// Unlike ffmpeg this is not a degradation: without a JS runtime YouTube
+// refuses the streams outright. Shown persistently, and the update banner
+// offers the one-click fix (the backend installs Deno via pip).
+const JS_RUNTIME_WARNING =
+  "YouTubeの新しい仕様に対応するための部品（Deno）が入っていません。" +
+  "このままではダウンロードが失敗します。上の「更新する」を押すと自動で導入されます。";
+
 const state = {
   url: null,
   mode: "video",
@@ -152,8 +159,25 @@ function showWarning(message) {
   els.warningBanner.classList.remove("hidden");
 }
 
+/** Warnings that explain a whole class of failures, re-shown after every clearBanners(). */
 function warnIfNoFfmpeg() {
-  if (state.health && !state.health.ffmpeg_available) showWarning(FFMPEG_WARNING);
+  if (!state.health) return;
+  if (!state.health.ffmpeg_available) showWarning(FFMPEG_WARNING);
+  // Strict false: a pre-2.1 backend does not send the field at all, and a
+  // missing field must not be mistaken for a missing runtime.
+  if (state.health.js_runtime_available === false) {
+    showWarning(JS_RUNTIME_WARNING);
+    offerUpdate("YouTube対応に必要な部品（Deno）が未導入です。");
+  }
+}
+
+/** Show the update banner with its button, bypassing any "後で" snooze. */
+function offerUpdate(text) {
+  els.updateText.textContent = text;
+  els.updateBtn.classList.remove("hidden");
+  els.updateBtn.disabled = false;
+  els.updateBtn.textContent = "更新する";
+  els.updateBanner.classList.remove("hidden");
 }
 
 // === Remedy buttons =========================================================
@@ -470,6 +494,12 @@ async function checkForUpdate() {
     const info = await ApiClient.checkUpdate();
     if (!info.update_available) return;
 
+    // A missing runtime is a breakage, not a nag — it ignores the snooze.
+    if (info.js_runtime_missing) {
+      offerUpdate(info.note || "YouTube対応に必要な部品（Deno）が未導入です。");
+      return;
+    }
+
     const { updateDismissedUntil = 0 } = await chrome.storage.local.get("updateDismissedUntil");
     if (Date.now() < updateDismissedUntil) return;
 
@@ -489,6 +519,13 @@ async function applyUpdate() {
     els.updateBanner.classList.remove("hidden");
     els.updateBtn.classList.add("hidden");
     els.updateDismiss.textContent = "閉じる";
+    if (!result.js_runtime_missing) {
+      // The runtime is now on disk even though the server still needs a
+      // restart; stop telling the user it is missing.
+      state.warnings = state.warnings.filter((w) => w !== JS_RUNTIME_WARNING);
+      els.warningText.textContent = state.warnings.join("\n\n");
+      els.warningBanner.classList.toggle("hidden", state.warnings.length === 0);
+    }
   } catch (e) {
     els.updateText.textContent = `更新に失敗しました: ${e.message}`;
     els.updateBtn.disabled = false;
@@ -512,6 +549,7 @@ async function showDiagnostics() {
     const lines = [
       `yt-dlp        : ${d.yt_dlp_version}`,
       `ffmpeg        : ${d.ffmpeg_available ? d.ffmpeg_path : "未インストール"}`,
+      `Deno(JS実行)  : ${d.js_runtime || "未導入 — 「更新する」で導入されます"}`,
       `Cookie取得元  : ${d.cookie_browser}`,
       `保存先        : ${d.download_dir}`,
       `Python        : ${d.python_version}`,

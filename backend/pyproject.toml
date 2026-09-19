@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "youtube-chushutu-backend"
-version = "2.0.0"
+version = "2.1.0"
 description = "Local backend for the YouTube Chushutu Chrome extension"
 requires-python = ">=3.10"
 dependencies = [
@@ -12,7 +12,16 @@ dependencies = [
     "uvicorn[standard]>=0.34",
     # Kept as a floating lower bound on purpose: YouTube changes often, and the
     # fix is almost always "install the newest yt-dlp".
-    "yt-dlp>=2025.1.1",
+    #
+    # [default] pulls in yt-dlp-ejs, the JavaScript that solves YouTube's
+    # playback challenges. Since late 2025 YouTube extraction needs that script
+    # plus a JS runtime to run it; without both, downloads 403 or lose formats.
+    "yt-dlp[default]>=2026.8.19",
+    # The JS runtime (Deno) is deliberately NOT listed here. Its wheel exists
+    # only for 64-bit mainstream platforms, and a dependency pip cannot satisfy
+    # would fail this whole install on e.g. 32-bit Python. The install/update
+    # scripts and the in-app update button add it with a separate, best-effort
+    # `pip install deno`; start.bat / the popup say so when it is missing.
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
 ]

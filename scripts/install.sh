@@ -63,12 +63,23 @@ echo "パッケージをインストール中..."
 "$VENV_DIR/bin/python" -m pip install -e "$BACKEND_DIR" -q
 echo "[OK] インストール完了"
 
+# YouTubeは2025年末以降JavaScriptランタイムを要求する。Denoはpipパッケージで入る
+# （64bitのみ）のでPATH設定は不要。失敗しても致命的ではなく、start.shとポップアップが知らせる。
+echo "Deno（YouTube対応に必要）を導入中... 約40MB"
+if ! "$VENV_DIR/bin/python" -m pip install --upgrade deno -q; then
+    echo "[WARN] Denoを導入できませんでした。Node.js 22以上をインストールしても代わりに使えます。"
+fi
+
 echo
 echo "--- インストール済みバージョン ---"
 "$VENV_DIR/bin/python" -c "
-import shutil, fastapi, yt_dlp
+import shutil, sys, fastapi, yt_dlp
+sys.path.insert(0, '$BACKEND_DIR')
+from app.services.extractor import detect_js_runtime
+rt = detect_js_runtime()
 print(f'  yt-dlp : {yt_dlp.version.__version__}')
 print(f'  FastAPI: {fastapi.__version__}')
+print('  Deno   : ' + (rt.summary if rt else '未導入 — YouTubeのダウンロードが失敗します'))
 print(f'  ffmpeg : {shutil.which(\"ffmpeg\") or \"未インストール\"}')
 "
 
@@ -86,6 +97,8 @@ echo "     → 「パッケージ化されていない拡張機能を読み込�
 echo "     → $PROJECT_DIR/extension を選択"
 echo
 echo "3. YouTubeの動画ページで拡張アイコン、または動画下の赤いボタンをクリック"
+echo
+echo "後で更新するとき（YouTubeの仕様変更・エラー時）: $PROJECT_DIR/update.sh"
 echo
 echo "困ったときは README.md を参照してください。"
 echo

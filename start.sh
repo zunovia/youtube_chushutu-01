@@ -30,12 +30,16 @@ import shutil, sys
 sys.path.insert(0, '.')
 import yt_dlp
 from app.config import settings
+from app.services.extractor import detect_js_runtime
+rt = detect_js_runtime()
 print(f'  yt-dlp:  {yt_dlp.version.__version__}')
+print('  Deno:    ' + (rt.summary if rt else 'NOT FOUND — YouTubeに必要です。update.sh を実行してください'))
 print(f\"  ffmpeg:  {shutil.which('ffmpeg') or 'NOT FOUND — MP3変換と1080p以上は不可'}\")
 print(f'  URL:     http://localhost:{settings.port}')
 print(f'  API Doc: http://localhost:{settings.port}/docs')
 "
 echo ""
+echo "更新するには（YouTubeの仕様変更・エラー時）: update.sh を実行"
 echo "停止するには Ctrl+C を押してください"
 echo "========================================="
 echo ""

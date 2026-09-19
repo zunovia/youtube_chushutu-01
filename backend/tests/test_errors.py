@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.errors import ACTION_UPDATE, ErrorCode, classify
+from app.services.errors import ACTION_UPDATE, ErrorCode, classify, describe
 
 CASES = [
     # ffmpeg — the failure that only appears at download time, because info
@@ -23,6 +23,11 @@ CASES = [
     ("ERROR: [youtube] abc: Sign in to confirm your age", ErrorCode.AGE_RESTRICTED),
 
     ("WARNING: [youtube] nsig extraction failed: Some formats may be missing", ErrorCode.OUTDATED_YTDLP),
+    # Runtime problems mention signatures/formats too, but must not be read as
+    # "update yt-dlp" — it may already be current.
+    ("WARNING: [youtube] No supported JavaScript runtime could be found. Only deno is enabled by default", ErrorCode.JS_RUNTIME_MISSING),
+    ("ERROR: [youtube] abc: n challenge solving failed: Some formats may be missing", ErrorCode.JS_RUNTIME_MISSING),
+    ("WARNING: [youtube] [jsc] Remote components are disabled: ejs:github", ErrorCode.JS_RUNTIME_MISSING),
     ("ERROR: Unable to extract player version", ErrorCode.OUTDATED_YTDLP),
     ("ERROR: unable to download video data: HTTP Error 403: Forbidden", ErrorCode.HTTP_FORBIDDEN),
 
@@ -77,3 +82,19 @@ def test_type_based_classification() -> None:
 
 def test_noise_is_stripped_from_raw() -> None:
     assert not classify("ERROR: Video unavailable").raw.startswith("ERROR")
+
+
+def test_missing_runtime_offers_the_update_button() -> None:
+    """The update button installs the runtime, so it must be the offered fix."""
+    result = classify("No supported JavaScript runtime could be found")
+    assert result.code is ErrorCode.JS_RUNTIME_MISSING
+    assert result.action == ACTION_UPDATE
+    assert "Deno" in result.message
+
+
+def test_describe_keeps_the_raw_text() -> None:
+    """Re-attributed errors must still show the original yt-dlp text in 詳細."""
+    result = describe(ErrorCode.JS_RUNTIME_MISSING, raw="HTTP Error 403: Forbidden")
+    assert result.code is ErrorCode.JS_RUNTIME_MISSING
+    assert result.raw == "HTTP Error 403: Forbidden"
+    assert result.remedy

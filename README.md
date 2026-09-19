@@ -18,6 +18,7 @@ Chrome拡張だけでは、映像と音声の結合やMP3変換ができませ�
 Chrome拡張 (MV3)  ←→  localhost:9160  ←→  Pythonバックエンド
   ポップアップUI                            FastAPI
   ページ内ボタン                            yt-dlp   ← 抽出エンジン
+                                            Deno     ← YouTubeの署名チャレンジを解く
                                             ffmpeg   ← 結合・変換
 ```
 
@@ -33,8 +34,14 @@ yt-dlpに触れるのは `backend/app/services/extractor.py` 1ファイルだけ
 |---|---|---|
 | Python 3.10以上 | 必須 | バックエンド |
 | Google Chrome | 必須 | 拡張機能 |
+| **Deno** | 必須（**自動で入ります**） | YouTubeの再生チャレンジを解くJavaScript実行環境 |
 | **ffmpeg** | ほぼ必須 | MP3変換、1080p以上の保存 |
 
+> **Denoについて（v2.1で追加）**
+> 2025年末からYouTubeは、動画URLを得るのにJavaScriptの計算問題を解くことを要求しています。
+> yt-dlpはそれをDenoで解きます。**Denoが無いと、yt-dlpが最新でもダウンロードは失敗します（403）。**
+> インストーラーと更新スクリプトが仮想環境の中に自動で入れるので、別途インストールは不要です。
+>
 > **ffmpegについて**
 > YouTubeの高画質動画は「映像」と「音声」が別々に配信されるため、結合にffmpegが必要です。
 > ffmpegが無くても720p程度までは保存できますが、**MP3変換と高画質保存はできません。**
@@ -51,13 +58,10 @@ yt-dlpに触れるのは `backend/app/services/extractor.py` 1ファイルだけ
 
 #### 方法A: ZIPをダウンロード（gitが不要・おすすめ）
 
-1. **[v2.0.0 をダウンロード](https://github.com/zunovia/youtube_chushutu-01/archive/refs/heads/v2.0.0.zip)**
+1. **[最新版をダウンロード](https://github.com/zunovia/youtube_chushutu-01/archive/refs/heads/main.zip)**
 2. 展開する（`C:\YouTubeChushutu` など、日本語やスペースを含まない場所を推奨）
 3. **Windows**: `scripts\install.bat` をダブルクリック
    **macOS / Linux**: `./scripts/install.sh`
-
-常に最新版が欲しい場合はこちら:
-<https://github.com/zunovia/youtube_chushutu-01/archive/refs/heads/main.zip>
 
 #### 方法B: git clone（更新が `git pull` だけで済む）
 
@@ -70,9 +74,8 @@ cd youtube_chushutu-01
 インストーラーは仮想環境の作成と依存パッケージの導入をまとめて行い、
 **ffmpegが無ければ `winget` での自動インストールも提案します。**
 
-> ZIPで導入した場合は `.git` が無いため、**本体の更新は再ダウンロード**になります。
-> ただしYouTubeの仕様変更に対応するyt-dlpの更新はアプリ内のボタンで完結するので、
-> 通常の運用で困ることはありません。
+> 導入後の更新は、ZIP・git どちらの場合も同梱の **`update.bat`**（`update.sh`）で完結します
+> （「更新方法」の節を参照）。ZIPを取り直す必要はありません。
 
 ### ステップ2: Chrome拡張の読み込み
 
@@ -107,15 +110,42 @@ YouTubeの画面には何も表示されません。
 保存先は既定で `~/Downloads/YouTubeChushutu` です（診断画面で確認できます）。
 
 **普段使うときは `start.bat` だけでOK** です。インストールは最初の1回だけです。
+動かなくなったら、同じフォルダの **`update.bat`** をダブルクリックしてください（次の節）。
 
 ---
 
 ## 更新方法（YouTubeの仕様が変わったとき）
 
-久しぶりに使って動かなくなった場合、ほとんどはyt-dlpが古いことが原因です。
+久しぶりに使って動かなくなった場合、原因はほぼ **yt-dlpが古い** か **Denoが未導入** のどちらかです。
+どちらも同じ操作で直ります。
 
-- **ポップアップに「yt-dlpの更新があります」と出たら「更新する」をクリック** → サーバーを再起動
-- または `scripts/update-ytdlp.bat`（Windows）/ `scripts/update-ytdlp.sh` を実行
+### いちばん簡単な方法: `update.bat` をダブルクリック
+
+`start.bat` と同じフォルダにある **`update.bat`**（macOS / Linux は `update.sh`）を実行します。
+次のことを全部やります：
+
+1. GitHubから最新版を取得し、プログラムを上書き（**仮想環境・設定・ダウンロード済みの動画はそのまま**）
+2. yt-dlpとチャレンジ解決スクリプトを最新にし、Denoを導入
+3. 導入されたバージョンを表示
+
+終わったら **① `start.bat` を起動** し、**② `chrome://extensions` で「YouTube Chushutu」の
+更新ボタン（丸い矢印）を押して** から、YouTubeのページを再読み込みしてください。
+②は拡張機能側のファイルも更新されるため必要です。
+
+> **`update.bat` がまだ無い（v2.0.0 のまま）PCの場合**
+> こちらからダウンロードして `start.bat` と同じフォルダに置き、ダブルクリックしてください：
+> <https://github.com/zunovia/youtube_chushutu-01/blob/main/update.bat>
+> （右上のダウンロードボタン ⤓ で保存。Chromeが警告を出したら「保存」を選ぶ）
+> 以後はそのファイルを押すだけで最新になります。
+
+> サーバー（`start.bat` の黒い画面）が開いたままだと、更新は安全のため中止されます。先に閉じてください。
+
+### ポップアップからの更新
+
+- ポップアップに **「yt-dlpの更新があります」** または **「Denoが未導入です」** と出たら
+  **「更新する」をクリック → サーバーを再起動**
+- yt-dlp・解決スクリプト・Denoがまとめて更新されます。拡張機能自体は更新されないので、
+  それでも直らないときは `update.bat` を使ってください。
 
 拡張は起動時に自動で更新の有無を確認します（結果は24時間キャッシュされ、オフラインでも問題ありません）。
 
@@ -124,13 +154,14 @@ YouTubeの画面には何も表示されません。
 ## トラブルシューティング
 
 まず **ポップアップ右上の「診断」** を開いてください。
-yt-dlpのバージョン、ffmpegの有無、保存先、直近のエラーがまとめて確認できます。
+yt-dlpのバージョン、Denoとffmpegの有無、保存先、直近のエラーがまとめて確認できます。
 
 | 表示されるエラー | 原因と対処 |
 |---|---|
 | **ffmpegがインストールされていません** | 最も多い原因です。PowerShellで `winget install --id Gyan.FFmpeg -e` を実行し、PowerShellを開き直してからサーバーを再起動してください。急ぐ場合は音声形式をM4Aにすると変換なしで保存できます。 |
-| **YouTubeにアクセスを拒否されました（403）** | yt-dlpが古いときに起きます。「yt-dlpを更新」→ サーバー再起動。 |
-| **YouTubeの仕様変更に追随できていません** | 同上。yt-dlpを更新してください。 |
+| **YouTubeの新しい仕様に対応するための部品（Deno）が入っていません** | v2.1で最も多い原因です。「更新する」を押す（またはフォルダの `update.bat`）→ サーバー再起動。診断画面の「Deno(JS実行)」行で導入済みか確認できます。 |
+| **YouTubeにアクセスを拒否されました（403）** | yt-dlpが古いか、Denoが無いときに起きます。「更新する」→ サーバー再起動。 |
+| **YouTubeの仕様変更に追随できていません** | 同上。更新してください。 |
 | **botと判定されました** | ChromeのCookieで自動的に再試行しますが、それでも駄目な場合はChromeでYouTubeにログインしてください。 |
 | **年齢制限つきの動画です** | ChromeでYouTubeにログインした状態にしてください。 |
 | **ブラウザのCookieを読み取れませんでした** | Chromeを完全に終了してから再試行してください。Chrome以外を使っている場合は `YTC_COOKIE_BROWSER=firefox` のように指定します。 |
@@ -165,7 +196,7 @@ YTC_SIMULATE_ERROR=BOT_CHECK ./start.sh    # 必ずbot判定エラーになる
 YTC_SIMULATE_FAIL_ATTEMPTS=2 ./start.sh    # 2回失敗してから成功する
 ```
 
-指定できる値: `BOT_CHECK` `OUTDATED_YTDLP` `HTTP_FORBIDDEN` `FFMPEG_MISSING`
+指定できる値: `BOT_CHECK` `OUTDATED_YTDLP` `JS_RUNTIME_MISSING` `HTTP_FORBIDDEN` `FFMPEG_MISSING`
 `AGE_RESTRICTED` `PRIVATE_VIDEO` `UNAVAILABLE` `GEO_BLOCKED` `LIVE_NOT_ENDED`
 `FORMAT_UNAVAILABLE` `COOKIE_LOCKED` `NETWORK` `DISK_ERROR`
 
@@ -176,15 +207,22 @@ YTC_SIMULATE_FAIL_ATTEMPTS=2 ./start.sh    # 2回失敗してから成功する
 ```
 backend/app/
   services/errors.py     エラー分類（正規表現 → 日本語メッセージ＋対処法）
-  services/extractor.py  yt-dlpに触れる唯一のファイル。再試行の連鎖もここ
-  services/updater.py    バージョン確認とpipによる更新
+  services/extractor.py  yt-dlpに触れる唯一のファイル。再試行の連鎖、Deno検出もここ
+  services/updater.py    バージョン確認とpipによる更新（yt-dlp[default] + deno）
   services/downloader.py バックグラウンドDLとタスク管理
   routers/video.py       REST API
 extension/
   popup/                 ツールバーのUI
   content/               YouTubeページ内のボタン
   lib/api-client.js      ポップアップとページ内ボタンで共有
+scripts/update.ps1       update.bat の本体（最新版の取得・上書き・pip更新）
+update.sh                同・macOS / Linux 版
 ```
+
+**Denoについて**
+yt-dlpは仮想環境の `Scripts`（`bin`）フォルダを最初に探すので、`pip install deno` だけで
+PATH設定なしに見つかります。`pyproject.toml` には意図的に入れていません（64bit以外に
+ホイールが無く、pipの依存解決ごと失敗するため）。スクリプトと更新ボタンがベストエフォートで入れます。
 
 **テストの実行**
 
@@ -197,6 +235,8 @@ backend/.venv/bin/python -m pytest backend/tests -q
 
 - yt-dlpの型・例外・オプションは `extractor.py` の外に出さない。仕様変更の影響をこの1ファイルに閉じ込めるため。
 - 日本語の文言はバックエンド側（`errors.py`）に集約する。拡張は受け取って表示するだけ。
+- `.bat` は全行ASCII。`update.bat` はさらに複数行ブロックと `goto` を使わない
+  （単体でダウンロードされるとLF改行になり、CMDが誤読するため）。
 - **セクション切り替えはバナー（エラー・警告）を消してはいけない。** v1ではエラー表示直後に消していたため、失敗が一切見えなかった。
 
 個人利用を想定しています。ダウンロードした動画の取り扱いは、各自の責任と利用規約の範囲で行ってください。

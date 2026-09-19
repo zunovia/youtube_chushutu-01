@@ -207,6 +207,15 @@
     status.className = "ytc-status";
 
     body.append(title, modes, formatSelect, audioSelect);
+    // Strict false: older backends omit the field.
+    if (health.js_runtime_available === false) {
+      const warn = document.createElement("p");
+      warn.className = "ytc-error";
+      warn.textContent =
+        "YouTube対応に必要な部品（Deno）が未導入のため失敗します。" +
+        "ツールバーの拡張アイコンを開き、「更新する」を押してください。";
+      body.appendChild(warn);
+    }
     if (!health.ffmpeg_available) {
       const warn = document.createElement("p");
       warn.className = "ytc-warn";

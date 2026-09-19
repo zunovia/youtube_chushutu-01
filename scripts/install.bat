@@ -75,9 +75,16 @@ echo Installing packages...
 "%VENV_DIR%\Scripts\python.exe" -m pip install -e "%BACKEND_DIR%" -q
 echo [OK] Packages installed
 
+REM YouTube needs a JavaScript runtime since late 2025. Deno ships as a pip
+REM package (64-bit only), so nothing goes on PATH. Failure here is not
+REM fatal: start.bat and the popup both say when it is missing.
+echo Installing the Deno runtime (about 40 MB)...
+"%VENV_DIR%\Scripts\python.exe" -m pip install --upgrade deno -q
+if %ERRORLEVEL% neq 0 echo [WARN] Deno could not be installed. Node.js 22+ from https://nodejs.org also works.
+
 echo.
 echo --- Installed versions ---
-"%VENV_DIR%\Scripts\python.exe" -c "import yt_dlp, fastapi, shutil; print(f'  yt-dlp : {yt_dlp.version.__version__}'); print(f'  FastAPI: {fastapi.__version__}'); print(f'  ffmpeg : {shutil.which(\"ffmpeg\") or \"NOT FOUND\"}')"
+"%VENV_DIR%\Scripts\python.exe" -c "import sys, yt_dlp, fastapi, shutil; sys.path.insert(0, r'%BACKEND_DIR%'); from app.services.extractor import detect_js_runtime; rt = detect_js_runtime(); print(f'  yt-dlp : {yt_dlp.version.__version__}'); print(f'  FastAPI: {fastapi.__version__}'); print('  Deno   : ' + (rt.summary if rt else 'NOT FOUND - YouTube downloads will fail')); print(f'  ffmpeg : {shutil.which(\"ffmpeg\") or \"NOT FOUND\"}')"
 
 echo.
 echo =========================================
@@ -95,6 +102,9 @@ echo      Select: %PROJECT_DIR%\extension
 echo.
 echo 3. Open a YouTube video page and click the extension icon,
 echo    or use the red button under the video.
+echo.
+echo To update later (YouTube changed / errors): run update.bat in
+echo      %PROJECT_DIR%
 echo.
 echo See README.md for troubleshooting.
 echo.

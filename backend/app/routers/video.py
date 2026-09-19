@@ -52,12 +52,15 @@ def _from_extraction_error(exc: ExtractionError) -> ErrorDetail:
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
-    """Liveness plus the two facts the popup needs up front."""
+    """Liveness plus the facts the popup needs up front."""
     extractor.refresh_ffmpeg()
+    extractor.refresh_js_runtime()
     return HealthResponse(
         status="ok",
         yt_dlp_version=get_yt_dlp_version(),
         ffmpeg_available=extractor.ffmpeg_available,
+        js_runtime_available=extractor.js_runtime_available,
+        js_runtime=extractor.js_runtime_summary,
         cookies_configured=extractor.cookies_configured(),
         download_dir=settings.download_dir,
     )
@@ -134,10 +137,12 @@ async def update_ytdlp() -> UpdateInfo:
 async def diagnostics() -> DiagnosticsResponse:
     """Everything needed to explain a breakage without reading the terminal."""
     extractor.refresh_ffmpeg()
+    extractor.refresh_js_runtime()
     return DiagnosticsResponse(
         yt_dlp_version=get_yt_dlp_version(),
         ffmpeg_available=extractor.ffmpeg_available,
         ffmpeg_path=extractor.ffmpeg_path,
+        js_runtime=extractor.js_runtime_summary,
         cookie_browser=settings.cookies_file or settings.cookie_browser,
         download_dir=settings.download_dir,
         python_version=sys.version.split()[0],
