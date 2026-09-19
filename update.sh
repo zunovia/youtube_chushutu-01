@@ -13,6 +13,36 @@ set -euo pipefail
 REPO="zunovia/youtube_chushutu-01"
 BRANCH="${YTC_BRANCH:-main}"
 
+# 指定 PID が自分（この update.sh）の先祖か。自分を起動したシェルの
+# コマンドラインに run.py が含まれていても、サーバーと誤認しないため。
+is_ancestor() {
+    local p=$$
+    while [ -n "$p" ] && [ "$p" -gt 1 ]; do
+        [ "$p" = "$1" ] && return 0
+        p="$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')"
+    done
+    return 1
+}
+
+# サーバーが動いているか。run.py は起動時に backend/ へ chdir するので、
+# 起動のしかた（start.sh 経由・絶対パス・相対パス）に関係なく cwd で判定できる。
+server_running() {
+    local venv="$1" backend="$2" pid cwd
+    for pid in $(pgrep -f "$venv/bin/python" 2>/dev/null); do
+        is_ancestor "$pid" || return 0
+    done
+    for pid in $(pgrep -f 'python[^ ]* .*run\.py' 2>/dev/null); do
+        is_ancestor "$pid" && continue
+        if [ -e "/proc/$pid/cwd" ]; then
+            cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+        else
+            cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+        fi
+        [ "$cwd" = "$backend" ] && return 0
+    done
+    return 1
+}
+
 main() {
     local project_dir backend venv py work src d f
     project_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -33,14 +63,16 @@ main() {
     echo "  フォルダ: $project_dir"
 
     # pip は使用中のファイルを置き換えられないので、サーバー起動中は止める。
-    if pgrep -f "$venv/bin/python" >/dev/null 2>&1; then
+    if server_running "$venv" "$(cd "$backend" && pwd -P)"; then
         echo
         echo "[ERROR] サーバーが起動中です。start.sh を Ctrl+C で止めてから、もう一度実行してください。"
         exit 1
     fi
 
     work="$(mktemp -d)"
-    trap 'rm -rf "$work"' EXIT
+    # Expand now: the trap fires after main() returns, when the local is gone.
+    # shellcheck disable=SC2064
+    trap "rm -rf '$work'" EXIT
 
     echo
     echo "==> 最新版をダウンロード中 ($BRANCH)"
@@ -100,7 +132,7 @@ rt = detect_js_runtime()
 print(f'  yt-dlp : {yt_dlp.version.__version__}')
 print('  Deno   : ' + (rt.summary if rt else '未導入 — YouTube のダウンロードが失敗します'))
 print('  ffmpeg : ' + (shutil.which('ffmpeg') or '未インストール — MP3変換と1080p以上は不可'))
-")
+") || echo "[WARN] バージョン表示に失敗しました（更新自体は完了しています）"
 
     echo
     echo "========================================="
