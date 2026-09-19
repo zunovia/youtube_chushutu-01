@@ -72,7 +72,7 @@ main() {
     work="$(mktemp -d)"
     # Expand now: the trap fires after main() returns, when the local is gone.
     # shellcheck disable=SC2064
-    trap "rm -rf '$work'" EXIT
+    trap "rm -rf '$work' 2>/dev/null || true" EXIT
 
     echo
     echo "==> 最新版をダウンロード中 ($BRANCH)"
