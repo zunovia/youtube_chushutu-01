@@ -50,9 +50,14 @@ fi
 
 # --- venv ---
 echo
-if [ -x "$VENV_DIR/bin/python" ]; then
+# 仮想環境は作成時のPythonを指しているだけなので、存在ではなく実行して確かめる。
+if [ -x "$VENV_DIR/bin/python" ] && "$VENV_DIR/bin/python" -c 'import sys' >/dev/null 2>&1; then
     echo "[OK] 仮想環境は既にあります"
 else
+    if [ -d "$VENV_DIR" ]; then
+        echo "[WARN] 既存の仮想環境が起動できないため作り直します"
+        rm -rf "$VENV_DIR"
+    fi
     echo "仮想環境を作成中..."
     "$PYTHON_CMD" -m venv "$VENV_DIR"
     echo "[OK] 仮想環境を作成しました"

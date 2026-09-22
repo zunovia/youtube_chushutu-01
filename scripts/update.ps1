@@ -101,26 +101,59 @@ try {
         if (Test-Path $from) { Copy-Item -Force $from (Join-Path $ProjectDir $file) }
     }
     # update.bat is the file that launched us. CMD reads a batch file as it
-    # runs, so touch it only when it really changed.
+    # runs, so touch it only when it really changed - and compare without
+    # line endings: a copy downloaded on its own is LF, the ZIP's is CRLF, and
+    # replacing one with the other shifts CMD's read offset into garbage.
     $newBat = Join-Path $Src "update.bat"
     $oldBat = Join-Path $ProjectDir "update.bat"
     if (Test-Path $newBat) {
-        if ((-not (Test-Path $oldBat)) -or ((Get-FileHash $newBat).Hash -ne (Get-FileHash $oldBat).Hash)) {
-            Copy-Item -Force $newBat $oldBat
+        $same = $false
+        if (Test-Path $oldBat) {
+            $a = (Get-Content -Raw $newBat) -replace "`r", ""
+            $b = (Get-Content -Raw $oldBat) -replace "`r", ""
+            $same = ($a -eq $b)
         }
+        if (-not $same) { Copy-Item -Force $newBat $oldBat }
     }
     Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
     Ok "Files updated"
 
     # --- Python packages -----------------------------------------------------
-    if (-not (Test-Path $VenvPython)) {
-        Step "No virtual environment yet - creating one"
-        $py = Get-Command python -ErrorAction SilentlyContinue
-        if (-not $py) { $py = Get-Command py -ErrorAction SilentlyContinue }
-        if (-not $py) {
-            Fail "Python was not found.`nInstall it from https://www.python.org/downloads/ (tick 'Add Python to PATH'),`nthen run update.bat again."
+    # A venv is only a pointer to the Python that created it. Uninstalling or
+    # upgrading that Python leaves python.exe in place but unable to start
+    # ("did not find executable at C:\Python3xx\python.exe"), so existence is
+    # not enough: run it.
+    $venvOk = $false
+    if (Test-Path $VenvPython) {
+        try {
+            $probe = Start-Process -FilePath $VenvPython -ArgumentList "-c", "import sys" -Wait -PassThru -NoNewWindow
+            $venvOk = ($probe.ExitCode -eq 0)
+        } catch { $venvOk = $false }
+        if (-not $venvOk) {
+            Warn "The virtual environment cannot start (the Python it was built with was removed or moved)."
+            Warn "Rebuilding it - this takes a little longer than a normal update."
+            Remove-Item -Recurse -Force $Venv
         }
-        & $py.Source -m venv $Venv
+    }
+    if (-not $venvOk) {
+        Step "Creating the virtual environment"
+        # 'py' first: on Windows a bare 'python' may be the Microsoft Store
+        # stub, which exists on PATH but only opens the Store. Prove each
+        # candidate by running it.
+        $py = $null
+        foreach ($name in @("py", "python", "python3")) {
+            $cmd = Get-Command $name -ErrorAction SilentlyContinue
+            if (-not $cmd) { continue }
+            try {
+                $v = Start-Process -FilePath $cmd.Source -ArgumentList "--version" -Wait -PassThru -NoNewWindow
+                if ($v.ExitCode -eq 0) { $py = $cmd.Source; break }
+            } catch { }
+        }
+        if (-not $py) {
+            Fail "Python was not found on this PC (it may have been uninstalled).`nInstall it from https://www.python.org/downloads/ - tick 'Add Python to PATH' -`nthen run update.bat again."
+        }
+        Write-Host "  using $py"
+        & $py -m venv $Venv
         if (-not (Test-Path $VenvPython)) { Fail "Could not create the virtual environment." }
     }
 

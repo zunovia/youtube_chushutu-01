@@ -62,9 +62,19 @@ echo.
 
 :venv
 echo.
+REM A venv only points at the Python that created it; if that Python was
+REM removed, python.exe is still there but cannot start. So run it.
+set "VENV_OK=0"
 if exist "%VENV_DIR%\Scripts\python.exe" (
+    "%VENV_DIR%\Scripts\python.exe" -c "import sys" >nul 2>&1 && set "VENV_OK=1"
+)
+if "%VENV_OK%"=="1" (
     echo [OK] Virtual environment already exists
 ) else (
+    if exist "%VENV_DIR%" (
+        echo [WARN] The existing virtual environment cannot start - rebuilding it.
+        rmdir /s /q "%VENV_DIR%"
+    )
     echo Creating virtual environment...
     python -m venv "%VENV_DIR%"
     echo [OK] Virtual environment created

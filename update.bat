@@ -13,4 +13,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "try { [Net.ServicePointM
 if errorlevel 1 echo Could not download the updater, using the local copy.
 if errorlevel 1 set "PS1=%~dp0scripts\update.ps1"
 if not exist "%PS1%" (echo [ERROR] No updater found. Check the internet connection and try again. & pause & exit /b 1)
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -ProjectDir "%~dp0." || pause
+REM "exit /b" on the same line: the updater may replace this file, and CMD
+REM would otherwise keep reading the new file from the old byte offset.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -ProjectDir "%~dp0." || pause & exit /b

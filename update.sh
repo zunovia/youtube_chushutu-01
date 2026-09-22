@@ -103,9 +103,15 @@ main() {
     chmod +x "$project_dir"/*.sh "$project_dir"/scripts/*.sh 2>/dev/null || true
     echo "[OK] ファイルを更新しました"
 
-    if [ ! -x "$py" ]; then
+    # 仮想環境は「作成時のPython」を指しているだけなので、そのPythonが消えると
+    # ファイルはあるのに起動できなくなる。存在ではなく実行して確かめる。
+    if [ ! -x "$py" ] || ! "$py" -c 'import sys' >/dev/null 2>&1; then
         echo
-        echo "==> 仮想環境が無いので作成します"
+        if [ -d "$venv" ]; then
+            echo "[WARN] 仮想環境が起動できません（作成時のPythonが削除された可能性）。作り直します。"
+            rm -rf "$venv"
+        fi
+        echo "==> 仮想環境を作成します"
         python3 -m venv "$venv"
     fi
 
