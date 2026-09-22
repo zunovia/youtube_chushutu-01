@@ -126,7 +126,10 @@ try {
     $venvOk = $false
     if (Test-Path $VenvPython) {
         try {
-            $probe = Start-Process -FilePath $VenvPython -ArgumentList "-c", "import sys" -Wait -PassThru -NoNewWindow
+            # --version needs no quoting. Start-Process joins -ArgumentList with
+            # spaces and no quotes, so '-c "import sys"' arrived as -c import sys,
+            # failed with a SyntaxError, and rebuilt a healthy venv on every run.
+            $probe = Start-Process -FilePath $VenvPython -ArgumentList "--version" -Wait -PassThru -NoNewWindow
             $venvOk = ($probe.ExitCode -eq 0)
         } catch { $venvOk = $false }
         if (-not $venvOk) {
