@@ -10,6 +10,10 @@ YouTube changes and something breaks:
   1. Update yt-dlp (the popup's 更新 button, or scripts/update-ytdlp).
   2. If that is not enough, edit ONLY this file.
 
+Sites: YouTube and Vimeo (public videos). Each URL is first resolved to a
+_Target that says which site it is and how yt-dlp should be asked for it;
+see resolve_target().
+
 Two behaviours here exist specifically because YouTube keeps moving:
 
   * A fallback chain of extraction strategies (different player clients, then
@@ -28,6 +32,7 @@ import shutil
 import subprocess
 import sysconfig
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -155,6 +160,57 @@ class DownloadResult:
     warnings: list[str] = field(default_factory=list)
 
 
+# --- Which site, and how to ask for it ---------------------------------------
+
+SITE_YOUTUBE = "youtube"
+SITE_VIMEO = "vimeo"
+SITE_OTHER = "other"
+
+# A Vimeo video id: digits, as the last numeric path segment of any vimeo.com
+# URL (vimeo.com/123, /channels/staffpicks/123, /groups/x/videos/123,
+# /showcase/9/video/123). An optional hash after it marks an unlisted video.
+_VIMEO_ID = re.compile(r"/(\d{4,})(?:/([0-9a-f]{6,}))?/?$")
+
+
+@dataclass(frozen=True)
+class _Target:
+    """A video URL rewritten into the form that works for its site."""
+
+    url: str
+    site: str
+    opts: dict = field(default_factory=dict)
+
+
+def resolve_target(url: str) -> _Target:
+    """Classify the URL and rewrite it where the site needs it.
+
+    Vimeo: since 2026 the vimeo.com page route ("web client") refuses
+    anonymous requests outright, even for public videos. The embed player
+    serves the same public video without an account, so page URLs are
+    rewritten to player.vimeo.com, with the Referer an embed would carry.
+    """
+    parsed = urllib.parse.urlparse(url.strip())
+    host = (parsed.hostname or "").lower()
+
+    if host.endswith("youtube.com") or host == "youtu.be":
+        return _Target(url=url, site=SITE_YOUTUBE)
+
+    if host == "vimeo.com" or host.endswith(".vimeo.com"):
+        headers = {"Referer": "https://vimeo.com/"}
+        if host == "player.vimeo.com":
+            return _Target(url=url, site=SITE_VIMEO, opts={"http_headers": headers})
+        match = _VIMEO_ID.search(parsed.path)
+        if match:
+            video_id, unlisted_hash = match.groups()
+            player = f"https://player.vimeo.com/video/{video_id}"
+            if unlisted_hash:
+                player += f"?h={unlisted_hash}"
+            return _Target(url=player, site=SITE_VIMEO, opts={"http_headers": headers})
+        return _Target(url=url, site=SITE_VIMEO)
+
+    return _Target(url=url, site=SITE_OTHER)
+
+
 @dataclass(frozen=True)
 class _Strategy:
     """One way of asking YouTube for a video."""
@@ -177,13 +233,20 @@ class _Strategy:
         return opts
 
 
-def _build_strategies() -> list[_Strategy]:
-    """The order in which we try to talk to YouTube.
+def _build_strategies(site: str = SITE_YOUTUBE) -> list[_Strategy]:
+    """The order in which we try to talk to the site.
+
+    Only YouTube gets the fallback chain: the alternative player clients are
+    YouTube's, and for public Vimeo videos the embed route either works or the
+    video is not public — retrying, or reading the browser's cookies, would
+    only delay saying so.
 
     Cookies come after the plain attempts because reading the browser's cookie
     store is intrusive and slow; we only pay that cost once YouTube has actually
     challenged us.
     """
+    if site != SITE_YOUTUBE:
+        return [_Strategy("標準")]
     strategies = [_Strategy("標準")]
     for client in settings.player_clients:
         strategies.append(_Strategy(f"クライアント:{client}", player_client=client))
@@ -255,6 +318,7 @@ def _simulated_failure(attempt_index: int) -> None:
         ),
         "AGE_RESTRICTED": "ERROR: [youtube] test: Sign in to confirm your age",
         "PRIVATE_VIDEO": "ERROR: [youtube] test: Private video",
+        "DRM_PROTECTED": "ERROR: This format is DRM protected; Try selecting another format",
         "UNAVAILABLE": "ERROR: [youtube] test: Video unavailable",
         "GEO_BLOCKED": "ERROR: [youtube] test: This video is not available in your country",
         "LIVE_NOT_ENDED": "ERROR: [youtube] test: This live event will begin in 2 hours",
@@ -363,6 +427,30 @@ def _resolve_output_path(ydl: yt_dlp.YoutubeDL, info: dict) -> Path:
     return planned
 
 
+# Marks the audio download's intermediate file. Without it, a site whose audio
+# stream is .mp4 (Vimeo) names the intermediate exactly like the video saved
+# earlier from the same page: yt-dlp then treats the video as "already
+# downloaded", extracts the audio from it, and deletes it as the source.
+_AUDIO_TMP_MARK = ".ytc-audio"
+
+
+def _finalize_audio_name(path: Path) -> Path:
+    """Strip the intermediate marker, never overwriting an existing file."""
+    if _AUDIO_TMP_MARK not in path.name or not path.exists():
+        return path
+    stem = path.name.split(_AUDIO_TMP_MARK, 1)[0]
+    ext = path.suffix.lower()
+    if ext == ".mp4":
+        ext = ".m4a"  # audio-only MP4 is M4A; ".mp4" would look like the video
+    target = path.with_name(stem + ext)
+    counter = 2
+    while target.exists():
+        target = path.with_name(f"{stem} ({counter}){ext}")
+        counter += 1
+    path.rename(target)
+    return target
+
+
 class Extractor:
     """The isolation boundary. Only this class touches yt-dlp."""
 
@@ -415,9 +503,11 @@ class Extractor:
         *,
         context: str,
         on_attempt: AttemptHook | None = None,
+        target: _Target | None = None,
     ) -> object:
         """Walk the strategy chain until one succeeds or a hard error appears."""
-        strategies = _build_strategies()
+        site = target.site if target else SITE_YOUTUBE
+        strategies = _build_strategies(site)
         attempts: list[str] = []
         errors: list[ClassifiedError] = []
 
@@ -426,6 +516,8 @@ class Extractor:
                 on_attempt(index + 1, len(strategies), strategy.name)
 
             opts = strategy.apply(_base_opts())
+            if target and target.opts:
+                opts = {**opts, **copy.deepcopy(target.opts)}
             try:
                 _simulated_failure(index)
                 return run(opts)
@@ -461,7 +553,8 @@ class Extractor:
                     time.sleep(2)
 
         primary = _primary_error(errors)
-        if primary.code in _RUNTIME_SHAPED and not self.js_runtime_available:
+        # The JS runtime is a YouTube requirement; a Vimeo 403 is about Vimeo.
+        if site == SITE_YOUTUBE and primary.code in _RUNTIME_SHAPED and not self.js_runtime_available:
             # Telling the user to update yt-dlp would send them in circles: it
             # may already be current. The missing piece is the runtime.
             primary = describe(ErrorCode.JS_RUNTIME_MISSING, raw=primary.raw)
@@ -472,6 +565,8 @@ class Extractor:
 
     def get_info(self, url: str, on_attempt: AttemptHook | None = None) -> VideoInfo:
         """Fetch metadata and available formats without downloading."""
+        target = resolve_target(url)
+        url = target.url
 
         def run(opts: dict) -> VideoInfo:
             opts = {**opts, "skip_download": True}
@@ -481,7 +576,7 @@ class Extractor:
                 raise ValueError("動画情報を取得できませんでした")
             return self._to_video_info(info)
 
-        return self._run_with_fallback(run, context="info", on_attempt=on_attempt)  # type: ignore[return-value]
+        return self._run_with_fallback(run, context="info", on_attempt=on_attempt, target=target)  # type: ignore[return-value]
 
     def _to_video_info(self, info: dict) -> VideoInfo:
         formats: list[FormatOption] = []
@@ -526,6 +621,8 @@ class Extractor:
         on_attempt: AttemptHook | None = None,
     ) -> DownloadResult:
         """Download video (with audio). Degrades gracefully when ffmpeg is absent."""
+        target = resolve_target(url)
+        url = target.url
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         warnings: list[str] = []
@@ -567,7 +664,7 @@ class Extractor:
                 )
             return DownloadResult(path=path, warnings=result_warnings)
 
-        return self._run_with_fallback(run, context="download", on_attempt=on_attempt)  # type: ignore[return-value]
+        return self._run_with_fallback(run, context="download", on_attempt=on_attempt, target=target)  # type: ignore[return-value]
 
     def download_audio(
         self,
@@ -578,6 +675,8 @@ class Extractor:
         on_attempt: AttemptHook | None = None,
     ) -> DownloadResult:
         """Download audio only, converting with ffmpeg when it is available."""
+        target = resolve_target(url)
+        url = target.url
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         warnings: list[str] = []
@@ -598,7 +697,7 @@ class Extractor:
             opts = {
                 **opts,
                 "format": "bestaudio/best" if use_postprocessor else "bestaudio[ext=m4a]/bestaudio",
-                "outtmpl": str(output_path / "%(title)s.%(ext)s"),
+                "outtmpl": str(output_path / f"%(title)s{_AUDIO_TMP_MARK}.%(ext)s"),
             }
             if use_postprocessor:
                 opts["postprocessors"] = [
@@ -617,9 +716,9 @@ class Extractor:
                     raise ValueError("音声のダウンロードに失敗しました")
                 path = _resolve_output_path(ydl, info)
 
-            return DownloadResult(path=path, warnings=list(warnings))
+            return DownloadResult(path=_finalize_audio_name(path), warnings=list(warnings))
 
-        return self._run_with_fallback(run, context="audio", on_attempt=on_attempt)  # type: ignore[return-value]
+        return self._run_with_fallback(run, context="audio", on_attempt=on_attempt, target=target)  # type: ignore[return-value]
 
     def cookies_configured(self) -> bool:
         """Whether a cookie source is available for the retry strategies."""

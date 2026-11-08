@@ -28,6 +28,7 @@ class ErrorCode(str, Enum):
     POSTPROCESS_ERROR = "POSTPROCESS_ERROR"
     AGE_RESTRICTED = "AGE_RESTRICTED"
     PRIVATE_VIDEO = "PRIVATE_VIDEO"
+    DRM_PROTECTED = "DRM_PROTECTED"
     UNAVAILABLE = "UNAVAILABLE"
     GEO_BLOCKED = "GEO_BLOCKED"
     LIVE_NOT_ENDED = "LIVE_NOT_ENDED"
@@ -96,6 +97,10 @@ _RULES: list[tuple[ErrorCode, re.Pattern[str]]] = [
         ),
     ),
     (
+        ErrorCode.DRM_PROTECTED,
+        re.compile(r"drm[- ]protected|is drm|\bdrm\b", re.I),
+    ),
+    (
         ErrorCode.AGE_RESTRICTED,
         re.compile(r"confirm your age|age[- ]restricted|inappropriate for some users", re.I),
     ),
@@ -137,7 +142,15 @@ _RULES: list[tuple[ErrorCode, re.Pattern[str]]] = [
     ),
     (
         ErrorCode.PRIVATE_VIDEO,
-        re.compile(r"private video|members[- ]only|join this channel|requires payment", re.I),
+        re.compile(
+            r"private video|members[- ]only|join this channel|requires payment"
+            # Vimeo: login-only, password-protected, embed-restricted, paid.
+            r"|only works when logged[- ]in|logged-in|login required|protected by a password"
+            r"|video password|embed-only|only available for purchase|vimeo on demand"
+            # Vimeo's player answers 401 for videos that are not public or not embeddable.
+            r"|http error 401|401:? unauthorized",
+            re.I,
+        ),
     ),
     (
         ErrorCode.GEO_BLOCKED,
@@ -151,6 +164,7 @@ _RULES: list[tuple[ErrorCode, re.Pattern[str]]] = [
         ErrorCode.UNAVAILABLE,
         re.compile(
             r"video unavailable|has been removed|been terminated|does not exist"
+            r"|http error 404|404:? not found"
             r"|this video is unavailable|removed by the uploader",
             re.I,
         ),
@@ -230,9 +244,15 @@ _MESSAGES: dict[ErrorCode, tuple[str, str, str]] = {
         ACTION_LOGIN,
     ),
     ErrorCode.PRIVATE_VIDEO: (
-        "非公開またはメンバー限定の動画です。",
-        "この動画を視聴できるアカウントでChromeにログインしている必要があります。",
-        ACTION_LOGIN,
+        "公開されていない動画です（非公開・メンバー限定・パスワード付き・有料など）。",
+        "誰でも見られる公開動画のみダウンロードできます。"
+        "YouTubeのメンバー限定動画は、視聴できるアカウントでChromeにログインしていれば取得できることがあります。",
+        "",
+    ),
+    ErrorCode.DRM_PROTECTED: (
+        "この動画はコピー保護（DRM）されているため、ダウンロードできません。",
+        "配信元が保護をかけている動画です。どの画質を選んでも取得できません。",
+        "",
     ),
     ErrorCode.UNAVAILABLE: (
         "動画が削除されているか、利用できません。",

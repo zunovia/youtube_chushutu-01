@@ -102,3 +102,16 @@
 .ytc-warn { color: #b7791f; font-size: 11px; margin-bottom: 9px; }
 .ytc-error { color: #e53e3e; }
 .ytc-ok { color: #38a169; font-weight: 600; }
+
+/* Vimeo: no stable spot in its markup, so the button floats in a corner. */
+.ytc-btn-floating {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 9998;
+  margin: 0;
+  height: 44px;
+  padding: 0 20px;
+  border-radius: 22px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .3);
+}

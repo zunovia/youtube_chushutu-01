@@ -1,5 +1,5 @@
 /**
- * In-page download button for YouTube watch pages.
+ * In-page download button for YouTube watch pages and Vimeo video pages.
  *
  * Three things make this survive YouTube's habit of changing:
  *   - The anchor is looked up through a list of candidate selectors, and if
@@ -21,7 +21,19 @@
   const BUTTON_ID = "ytc-download-button";
   const PANEL_ID = "ytc-panel";
 
-  // Tried in order; the first one present wins.
+  const IS_VIMEO = /(^|\.)vimeo\.com$/.test(location.hostname);
+
+  /** True on a page that shows a single video this tool can fetch. */
+  function isVideoPage() {
+    if (IS_VIMEO) {
+      // vimeo.com/123, /channels/x/123, /groups/x/videos/123, /showcase/9/video/123,
+      // optionally followed by an unlisted hash. Same rule as the backend's.
+      return /\/\d{4,}(\/[0-9a-f]{6,})?\/?$/.test(location.pathname);
+    }
+    return location.pathname.startsWith("/watch");
+  }
+
+  // YouTube: tried in order; the first one present wins.
   const ANCHORS = [
     "#top-level-buttons-computed",
     "ytd-watch-metadata #actions-inner #top-level-buttons-computed",
@@ -34,6 +46,10 @@
   // the panel closes would schedule a fresh timer nothing can cancel, and keep
   // polling into a detached DOM node.
   let watchToken = null;
+
+  // The URL the open panel was built for.
+  let panelUrl = null;
+  let lastUrl = location.href;
 
   const notify = (message) => chrome.runtime.sendMessage(message).catch(() => {});
 
@@ -48,11 +64,12 @@
   }
 
   function inject() {
-    if (!location.pathname.startsWith("/watch")) return;
+    if (!isVideoPage()) {
+      // Both sites are SPAs: leaving a video page must take the button along.
+      document.getElementById(BUTTON_ID)?.remove();
+      return;
+    }
     if (document.getElementById(BUTTON_ID)) return;
-
-    const anchor = findAnchor();
-    if (!anchor) return; // YouTube changed its layout — stay quiet.
 
     const button = document.createElement("button");
     button.id = BUTTON_ID;
@@ -60,6 +77,18 @@
     button.textContent = "↓ 保存";
     button.title = "YouTube Chushutu でダウンロード";
     button.addEventListener("click", togglePanel);
+
+    if (IS_VIMEO) {
+      // Vimeo's markup uses generated class names that change with each
+      // release, so there is no stable spot to slot into. A fixed button in
+      // the corner survives any redesign.
+      button.classList.add("ytc-btn-floating");
+      document.body.appendChild(button);
+      return;
+    }
+
+    const anchor = findAnchor();
+    if (!anchor) return; // YouTube changed its layout — stay quiet.
     anchor.appendChild(button);
   }
 
@@ -135,7 +164,8 @@
     }
 
     try {
-      const info = await ApiClient.getVideoInfo(location.href);
+      panelUrl = location.href;
+      const info = await ApiClient.getVideoInfo(panelUrl);
       renderForm(body, info, health);
     } catch (e) {
       showMessage(body, e.message, e.remedy);
@@ -241,7 +271,7 @@
     status.textContent = "開始しています...";
 
     try {
-      const request = { url: location.href, audio_only: audio };
+      const request = { url: panelUrl || location.href, audio_only: audio };
       if (audio) request.audio_format = audioFormat;
       else if (formatId) request.format_id = formatId;
 
@@ -333,6 +363,12 @@
     if (injectTimer) return;
     injectTimer = setTimeout(() => {
       injectTimer = null;
+      // Vimeo has no navigation event like YouTube's, so notice URL changes
+      // here: a panel for the previous video must not stay open.
+      if (location.href !== lastUrl) {
+        lastUrl = location.href;
+        removePanel();
+      }
       inject();
     }, 250);
   });

@@ -1,6 +1,6 @@
 # YouTube Chushutu
 
-YouTube動画のダウンロードと音声抽出を行う、個人利用向けのChrome拡張です。
+YouTube と Vimeo（公開動画）のダウンロードと音声抽出を行う、個人利用向けのChrome拡張です。
 
 - 画質を選んで動画をダウンロード
 - 音声だけをMP3 / M4Aで抽出
@@ -104,8 +104,18 @@ YouTubeの画面には何も表示されません。
 
 1. バックエンドを起動 — **Windows**: `start.bat` / **macOS・Linux**: `./start.sh`
 2. YouTubeの動画ページを開く
-3. ツールバーの拡張アイコン、または動画下の赤い「↓ 保存」ボタンをクリック
+3. ツールバーの拡張アイコン、または赤い「↓ 保存」ボタンをクリック
+   - YouTube: 動画の下（高評価・共有ボタンの並び）
+   - Vimeo: 画面の**右下**に浮かんで表示されます
 4. 画質・形式を選んでダウンロード
+
+### Vimeo について（v2.2で追加）
+
+- **誰でも見られる公開動画のみ**対象です。Vimeoへのログインは不要で、アカウントには一切触れません。
+- 動画のページ（`vimeo.com/12345678` の形）で使います。`vimeo.com/home` などの一覧画面では使えません。
+- 次の動画は配信元の制限により**取得できません**（エラーで理由が表示されます）：
+  コピー保護（DRM）付き、非公開・限定公開、パスワード付き、埋め込み禁止、有料（Vimeo On Demand）。
+  Vimeo 公式の動画には DRM 付きのものがあります。
 
 保存先は既定で `~/Downloads/YouTubeChushutu` です（診断画面で確認できます）。
 
@@ -166,6 +176,8 @@ yt-dlpのバージョン、Denoとffmpegの有無、保存先、直近のエラ�
 | **年齢制限つきの動画です** | ChromeでYouTubeにログインした状態にしてください。 |
 | **ブラウザのCookieを読み取れませんでした** | Chromeを完全に終了してから再試行してください。Chrome以外を使っている場合は `YTC_COOKIE_BROWSER=firefox` のように指定します。 |
 | **バックエンドに接続できません** | `start.bat` を実行してサーバーを起動してください。ポート9160が他のソフトと衝突している場合は、`YTC_PORT` でサーバー側を変更し、**同じ番号を拡張機能の「診断」画面のポート欄にも入力**してください（両方を合わせる必要があります）。 |
+| **コピー保護（DRM）されているため、ダウンロードできません** | 配信元が保護している動画で、どの画質・どのツールでも取得できません。Vimeo公式の動画などで起きます。 |
+| **公開されていない動画です** | 非公開・限定公開・パスワード付き・埋め込み禁止・有料の動画です。公開動画のみ対応しています。 |
 | **選択した画質が取得できませんでした** | 画質を「自動（最高画質）」にしてやり直してください。 |
 | 動画下にボタンが出ない | **まずChromeツールバーに拡張アイコンがあるか確認してください。**無ければ拡張が読み込まれていません（インストールのステップ2）。アイコンがあるのにボタンだけ出ない場合は、ページをF5で再読み込み。それでも出ないときはYouTube側のレイアウト変更の可能性があり、ツールバーの拡張アイコンからは引き続き使えます。 |
 
@@ -197,7 +209,7 @@ YTC_SIMULATE_FAIL_ATTEMPTS=2 ./start.sh    # 2回失敗してから成功する
 ```
 
 指定できる値: `BOT_CHECK` `OUTDATED_YTDLP` `JS_RUNTIME_MISSING` `HTTP_FORBIDDEN` `FFMPEG_MISSING`
-`AGE_RESTRICTED` `PRIVATE_VIDEO` `UNAVAILABLE` `GEO_BLOCKED` `LIVE_NOT_ENDED`
+`AGE_RESTRICTED` `PRIVATE_VIDEO` `DRM_PROTECTED` `UNAVAILABLE` `GEO_BLOCKED` `LIVE_NOT_ENDED`
 `FORMAT_UNAVAILABLE` `COOKIE_LOCKED` `NETWORK` `DISK_ERROR`
 
 ---
@@ -207,7 +219,8 @@ YTC_SIMULATE_FAIL_ATTEMPTS=2 ./start.sh    # 2回失敗してから成功する
 ```
 backend/app/
   services/errors.py     エラー分類（正規表現 → 日本語メッセージ＋対処法）
-  services/extractor.py  yt-dlpに触れる唯一のファイル。再試行の連鎖、Deno検出もここ
+  services/extractor.py  yt-dlpに触れる唯一のファイル。再試行の連鎖、Deno検出、
+                         サイト判定（Vimeoのページ→プレーヤーURL変換）もここ
   services/updater.py    バージョン確認とpipによる更新（yt-dlp[default] + deno）
   services/downloader.py バックグラウンドDLとタスク管理
   routers/video.py       REST API

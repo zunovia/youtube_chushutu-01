@@ -54,6 +54,20 @@ const mutate = (change) =>
     return next;
   });
 
+/** A YouTube watch page, or a Vimeo page for one video (same rule as content.js). */
+function isVideoUrl(url) {
+  if (!url) return false;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.hostname === "www.youtube.com") return parsed.pathname.startsWith("/watch");
+  if (parsed.hostname === "vimeo.com") return /\/\d{4,}(\/[0-9a-f]{6,})?\/?$/.test(parsed.pathname);
+  return false;
+}
+
 async function handle(message) {
   switch (message.type) {
     case "API_REQUEST": {
@@ -67,8 +81,7 @@ async function handle(message) {
 
     case "GET_VIDEO_URL": {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const isWatch = tab?.url?.includes("youtube.com/watch");
-      return { url: isWatch ? tab.url : null };
+      return { url: isVideoUrl(tab?.url) ? tab.url : null };
     }
 
     case "DOWNLOAD_STARTED":

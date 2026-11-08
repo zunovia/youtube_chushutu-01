@@ -353,7 +353,7 @@ function formatDuration(seconds) {
 async function startDownload() {
   if (!state.url) {
     showError("動画のURLを取得できませんでした。", {
-      remedy: "YouTubeの動画ページを開いた状態で、拡張機能のアイコンをクリックしてください。",
+      remedy: "YouTube または Vimeo の動画ページを開いた状態で、拡張機能のアイコンをクリックしてください。",
     });
     els.downloadBtn.disabled = false;
     return;
