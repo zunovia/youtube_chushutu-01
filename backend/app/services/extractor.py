@@ -181,8 +181,20 @@ class _Target:
     opts: dict = field(default_factory=dict)
 
 
-def resolve_target(url: str) -> _Target:
+def _origin(url: str) -> str | None:
+    parsed = urllib.parse.urlparse(url or "")
+    if parsed.scheme in ("http", "https") and parsed.hostname:
+        return f"{parsed.scheme}://{parsed.netloc}/"
+    return None
+
+
+def resolve_target(url: str, referer: str | None = None) -> _Target:
     """Classify the URL and rewrite it where the site needs it.
+
+    `referer` is the page a video is embedded in, when the user picked it with
+    「このページの動画を探す」. Embeds restricted to one site (Vimeo's
+    "embed only on these domains", most sites' own players) are served only
+    when the request says it comes from that site, as the browser's does.
 
     Vimeo: since 2026 the vimeo.com page route ("web client") refuses
     anonymous requests outright, even for public videos. The embed player
@@ -195,8 +207,10 @@ def resolve_target(url: str) -> _Target:
     if host.endswith("youtube.com") or host == "youtu.be":
         return _Target(url=url, site=SITE_YOUTUBE)
 
+    page_origin = _origin(referer) if referer else None
+
     if host == "vimeo.com" or host.endswith(".vimeo.com"):
-        headers = {"Referer": "https://vimeo.com/"}
+        headers = {"Referer": page_origin or "https://vimeo.com/"}
         if host == "player.vimeo.com":
             return _Target(url=url, site=SITE_VIMEO, opts={"http_headers": headers})
         match = _VIMEO_ID.search(parsed.path)
@@ -208,6 +222,8 @@ def resolve_target(url: str) -> _Target:
             return _Target(url=player, site=SITE_VIMEO, opts={"http_headers": headers})
         return _Target(url=url, site=SITE_VIMEO)
 
+    if page_origin:
+        return _Target(url=url, site=SITE_OTHER, opts={"http_headers": {"Referer": page_origin}})
     return _Target(url=url, site=SITE_OTHER)
 
 
@@ -563,9 +579,11 @@ class Extractor:
 
     # --- Public API ---------------------------------------------------------
 
-    def get_info(self, url: str, on_attempt: AttemptHook | None = None) -> VideoInfo:
+    def get_info(
+        self, url: str, on_attempt: AttemptHook | None = None, referer: str | None = None
+    ) -> VideoInfo:
         """Fetch metadata and available formats without downloading."""
-        target = resolve_target(url)
+        target = resolve_target(url, referer)
         url = target.url
 
         def run(opts: dict) -> VideoInfo:
@@ -619,9 +637,10 @@ class Extractor:
         output_dir: str,
         progress_callback: ProgressHook | None = None,
         on_attempt: AttemptHook | None = None,
+        referer: str | None = None,
     ) -> DownloadResult:
         """Download video (with audio). Degrades gracefully when ffmpeg is absent."""
-        target = resolve_target(url)
+        target = resolve_target(url, referer)
         url = target.url
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -673,9 +692,10 @@ class Extractor:
         output_dir: str = ".",
         progress_callback: ProgressHook | None = None,
         on_attempt: AttemptHook | None = None,
+        referer: str | None = None,
     ) -> DownloadResult:
         """Download audio only, converting with ffmpeg when it is available."""
-        target = resolve_target(url)
+        target = resolve_target(url, referer)
         url = target.url
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)

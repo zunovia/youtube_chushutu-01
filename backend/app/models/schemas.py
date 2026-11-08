@@ -47,6 +47,8 @@ class DownloadRequest(BaseModel):
     format_id: str | None = None  # None なら最高画質を自動選択
     audio_only: bool = False
     audio_format: str = "mp3"  # mp3 または m4a
+    # 埋め込み動画のとき、その動画が載っていたページのURL（埋め込み先制限のある動画用）
+    referer: str | None = None
 
 
 class DownloadTask(BaseModel):

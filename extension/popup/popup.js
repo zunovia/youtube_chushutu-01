@@ -14,6 +14,9 @@
 const $ = (id) => document.getElementById(id);
 
 const els = {
+  scanBtn: $("scan-btn"),
+  scanStatus: $("scan-status"),
+  scanResults: $("scan-results"),
   statusDot: $("status-dot"),
   diagnosticsBtn: $("diagnostics-btn"),
 
@@ -106,6 +109,9 @@ const JS_RUNTIME_WARNING =
 
 const state = {
   url: null,
+  // Set when the video was picked from a page it is embedded in: that page,
+  // which sites that restrict embedding check the request against.
+  referer: null,
   mode: "video",
   taskId: null,
   filePath: null,
@@ -294,7 +300,7 @@ async function loadVideoInfo(url, { silent = false } = {}) {
   }
 
   try {
-    const info = await ApiClient.getVideoInfo(url);
+    const info = await ApiClient.getVideoInfo(url, state.referer);
     renderVideoInfo(info);
     state.failedStage = null;
     if (!silent) showSection("video-info");
@@ -363,7 +369,7 @@ async function startDownload() {
   clearBanners();
   warnIfNoFfmpeg();
 
-  const request = { url: state.url, audio_only: state.mode === "audio" };
+  const request = { url: state.url, audio_only: state.mode === "audio", referer: state.referer };
   if (state.mode === "video") {
     if (els.formatSelect.value) request.format_id = els.formatSelect.value;
   } else {
@@ -573,6 +579,8 @@ async function showDiagnostics() {
 // === Events =================================================================
 
 function wireEvents() {
+  els.scanBtn.addEventListener("click", scanPage);
+
   els.tabVideo.addEventListener("click", () => setMode("video"));
   els.tabAudio.addEventListener("click", () => setMode("audio"));
 
@@ -634,4 +642,111 @@ function setMode(mode) {
   els.tabAudio.classList.toggle("active", mode === "audio");
   els.videoOptions.classList.toggle("hidden", mode !== "video");
   els.audioOptions.classList.toggle("hidden", mode === "video");
+}
+
+
+// === Embedded videos on any page ============================================
+//
+// For a video embedded in some other site — typically one the user logged in
+// to. Runs only when the user presses the button, on the tab they are looking
+// at (activeTab), and only reads the page: what players are embedded where.
+// The download then goes out with that page as its origin, as the browser's
+// own requests do, which is what embed-restricted players check.
+
+/** Injected into the page. Must be self-contained: it runs in the page, not here. */
+function findEmbeddedVideos() {
+  const found = new Map();
+  let blobCount = 0;
+  const add = (kind, url) => {
+    if (!url || found.has(url)) return;
+    if (url.startsWith("blob:")) {
+      blobCount += 1;
+      return;
+    }
+    if (!/^https?:/i.test(url)) return;
+    found.set(url, { kind, url });
+  };
+  const classify = (src) => {
+    if (/player\.vimeo\.com\/video\/\d+/i.test(src)) return "Vimeo（埋め込み）";
+    if (/youtube(-nocookie)?\.com\/embed\//i.test(src)) return "YouTube（埋め込み）";
+    if (/\.m3u8(\?|$)/i.test(src)) return "動画ストリーム（HLS）";
+    if (/\.(mp4|m4v|webm|mov)(\?|$)/i.test(src)) return "動画ファイル";
+    return null;
+  };
+
+  const scan = (doc, depth) => {
+    for (const frame of doc.querySelectorAll("iframe, embed")) {
+      const src = frame.src || frame.getAttribute("data-src") || "";
+      const kind = classify(src);
+      if (kind) add(kind, src);
+      else if (src && /video|player|movie|stream|embed/i.test(src)) add("埋め込みプレーヤー", src);
+      // Same-site frames can be looked into; other sites' cannot (and need not).
+      if (depth < 3) {
+        try {
+          if (frame.contentDocument) scan(frame.contentDocument, depth + 1);
+        } catch { /* cross-origin */ }
+      }
+    }
+    for (const video of doc.querySelectorAll("video, audio")) {
+      add(classify(video.currentSrc || video.src) || "動画", video.currentSrc || video.src);
+      for (const source of video.querySelectorAll("source")) add(classify(source.src) || "動画", source.src);
+    }
+    // Player configs embedded in scripts (JW Player, Video.js, site-made players).
+    const html = doc.documentElement ? doc.documentElement.innerHTML : "";
+    const urls = html.match(/https?:\\?\/\\?\/[^"'\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\s<>]*)?/gi) || [];
+    for (const raw of urls.slice(0, 30)) add(classify(raw.replace(/\\\//g, "/")) || "動画", raw.replace(/\\\//g, "/"));
+    for (const m of html.match(/player\.vimeo\.com\/video\/\d+(?:\?h=[0-9a-f]+)?/gi) || []) {
+      // The same player usually also appears as an iframe, with extra query parameters.
+      const id = m.match(/video\/(\d+)/)[1];
+      if (![...found.keys()].some((u) => u.includes(`/video/${id}`))) add("Vimeo（埋め込み）", "https://" + m);
+    }
+  };
+  scan(document, 0);
+  return { pageUrl: location.href, title: document.title, items: [...found.values()].slice(0, 20), blobCount };
+}
+
+async function scanPage() {
+  els.scanResults.replaceChildren();
+  els.scanStatus.classList.remove("hidden");
+  els.scanStatus.textContent = "ページを調べています...";
+
+  let result;
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [injection] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: findEmbeddedVideos });
+    result = injection?.result;
+  } catch (e) {
+    els.scanStatus.textContent =
+      "このページは調べられません（Chromeの設定画面などは対象外です）。\n" + String(e?.message || e);
+    return;
+  }
+
+  const items = result?.items || [];
+  if (!items.length) {
+    els.scanStatus.textContent = result?.blobCount
+      ? "動画は見つかりましたが、ページ内で分割・暗号化して再生する方式のため、直接は取得できませんでした。\n" +
+        "動画を一度再生してから、もう一度「探す」を押すと見つかることがあります。"
+      : "このページには動画が見つかりませんでした。\n動画が表示されている画面で、一度再生してからもう一度お試しください。";
+    return;
+  }
+
+  els.scanStatus.textContent = `${items.length}件見つかりました。ダウンロードする動画を選んでください：`;
+  for (const item of items) {
+    const li = document.createElement("li");
+    const button = document.createElement("button");
+    const kind = document.createElement("span");
+    kind.className = "scan-kind";
+    kind.textContent = item.kind;
+    const url = document.createElement("span");
+    url.className = "scan-url";
+    url.textContent = item.url.length > 90 ? item.url.slice(0, 90) + "…" : item.url;
+    button.append(kind, url);
+    button.addEventListener("click", () => {
+      state.url = item.url;
+      state.referer = result.pageUrl;
+      loadVideoInfo(item.url);
+    });
+    li.appendChild(button);
+    els.scanResults.appendChild(li);
+  }
 }

@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "YouTube Chushutu",
-  "version": "2.2.0",
-  "description": "YouTube・Vimeo（公開動画）のダウンロードと音声抽出",
+  "version": "2.3.0",
+  "description": "YouTube・Vimeo、およびログイン中のページに埋め込まれた動画のダウンロードと音声抽出",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
     "https://www.youtube.com/*",

@@ -163,11 +163,15 @@ const ApiClient = {
   healthCheck: () => request("/health", { timeout: 4000 }),
 
   /** Video metadata and formats. Slow: the retry chain runs behind this. */
-  getVideoInfo: (url) => request(`/info?url=${encodeURIComponent(url)}`, { timeout: 90000 }),
+  getVideoInfo: (url, referer = null) =>
+    request(
+      `/info?url=${encodeURIComponent(url)}` + (referer ? `&referer=${encodeURIComponent(referer)}` : ""),
+      { timeout: 90000 }
+    ),
 
   /** Queue a download. Resolves to { task_id }. */
-  startDownload: ({ url, format_id = null, audio_only = false, audio_format = "mp3" }) =>
-    request("/download", { method: "POST", body: { url, format_id, audio_only, audio_format } }),
+  startDownload: ({ url, format_id = null, audio_only = false, audio_format = "mp3", referer = null }) =>
+    request("/download", { method: "POST", body: { url, format_id, audio_only, audio_format, referer } }),
 
   /** Poll progress. Throws with status 404 once the task is gone. */
   getProgress: (taskId) => request(`/progress/${taskId}`, { timeout: 8000 }),

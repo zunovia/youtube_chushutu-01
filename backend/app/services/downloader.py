@@ -145,6 +145,7 @@ class DownloadManager:
                     output_dir=settings.download_dir,
                     progress_callback=progress,
                     on_attempt=attempt,
+                    referer=request.referer,
                 )
             else:
                 result = self._extractor.download(
@@ -153,6 +154,7 @@ class DownloadManager:
                     output_dir=settings.download_dir,
                     progress_callback=progress,
                     on_attempt=attempt,
+                    referer=request.referer,
                 )
 
             self._update(

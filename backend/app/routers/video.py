@@ -67,12 +67,15 @@ async def health_check() -> HealthResponse:
 
 
 @router.get("/info", response_model=VideoInfo)
-async def get_video_info(url: str = Query(..., description="YouTube video URL")):
+async def get_video_info(
+    url: str = Query(..., description="Video URL"),
+    referer: str | None = Query(None, description="Page the video is embedded in"),
+):
     """Fetch video metadata and available formats."""
     try:
         # yt-dlp is blocking; without the threadpool this stalls every other
         # request (including /health) for the whole extraction.
-        return await run_in_threadpool(extractor.get_info, url)
+        return await run_in_threadpool(extractor.get_info, url, None, referer)
     except ExtractionError as exc:
         return _error_response(_from_extraction_error(exc))
     except Exception as exc:  # noqa: BLE001

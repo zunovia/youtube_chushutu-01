@@ -227,9 +227,10 @@ _MESSAGES: dict[ErrorCode, tuple[str, str, str]] = {
         ACTION_UPDATE,
     ),
     ErrorCode.HTTP_FORBIDDEN: (
-        "YouTubeにアクセスを拒否されました（HTTP 403）。",
-        "yt-dlpが古いと発生しやすいエラーです。「yt-dlpを更新」を押して"
-        "最新版にしてから、サーバーを再起動してください。",
+        "動画の配信元にアクセスを拒否されました（HTTP 403）。",
+        "YouTubeの場合はyt-dlpが古いと起きやすいので「yt-dlpを更新」→サーバー再起動を。"
+        "ほかのサイトに埋め込まれた動画は、その動画が表示されているページを開いて"
+        "拡張アイコンの「このページの動画を探す」から選んでください。",
         ACTION_UPDATE,
     ),
     ErrorCode.POSTPROCESS_ERROR: (

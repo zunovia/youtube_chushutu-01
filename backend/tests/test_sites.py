@@ -166,3 +166,34 @@ def test_existing_audio_is_not_overwritten(tmp_path) -> None:
 
     assert final == tmp_path / "Clip (2).mp3"
     assert (tmp_path / "Clip.mp3").read_bytes() == b"first"
+
+
+# --- Videos embedded in another site (「このページの動画を探す」) -----------------
+
+PAGE = "https://form.qooker.jp/Q/ja/qrrt2026/practice/"
+
+
+def test_vimeo_embed_carries_the_embedding_site_as_referer() -> None:
+    """Vimeo's 'embed only on these domains' checks the Referer against the site."""
+    target = resolve_target("https://player.vimeo.com/video/123456789?h=abcdef0123", referer=PAGE)
+    assert target.site == SITE_VIMEO
+    assert target.url == "https://player.vimeo.com/video/123456789?h=abcdef0123"
+    assert target.opts["http_headers"]["Referer"] == "https://form.qooker.jp/"
+
+
+def test_site_own_player_gets_the_page_origin() -> None:
+    target = resolve_target("https://cdn.example.net/hls/lesson1/master.m3u8?token=x", referer=PAGE)
+    assert target.site == SITE_OTHER
+    assert target.opts["http_headers"]["Referer"] == "https://form.qooker.jp/"
+
+
+def test_without_referer_vimeo_keeps_its_default() -> None:
+    assert resolve_target("https://player.vimeo.com/video/1").opts["http_headers"]["Referer"] == "https://vimeo.com/"
+
+
+def test_a_bogus_referer_is_ignored() -> None:
+    assert resolve_target("https://cdn.example.net/a.mp4", referer="javascript:alert(1)").opts == {}
+
+
+def test_403_wording_is_not_youtube_specific() -> None:
+    assert "YouTubeにアクセス" not in classify("HTTP Error 403: Forbidden").message

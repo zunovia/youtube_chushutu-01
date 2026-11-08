@@ -49,6 +49,12 @@
   <!-- Sections: exactly one visible at a time -->
   <div id="not-youtube" class="section hidden">
     <p class="muted">YouTube または Vimeo の動画ページを開いてください</p>
+    <div class="scan-box">
+      <p class="scan-hint">ほかのサイト（ログインして見る研修動画など）に埋め込まれた動画は、そのページを開いた状態でこちら：</p>
+      <button id="scan-btn" class="btn-secondary">このページの動画を探す</button>
+      <p id="scan-status" class="scan-status hidden"></p>
+      <ul id="scan-results" class="scan-results"></ul>
+    </div>
   </div>
 
   <div id="loading" class="section hidden">
