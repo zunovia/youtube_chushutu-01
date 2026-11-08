@@ -108,7 +108,8 @@
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 9998;
+  /* Vimeo stacks banners and overlays high; stay above all of them. */
+  z-index: 2147483646;
   margin: 0;
   height: 44px;
   padding: 0 20px;
